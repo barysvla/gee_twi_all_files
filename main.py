@@ -11,7 +11,7 @@ from scripts.visualization import visualize_map
 
 # Autentizace a inicializace GEE
 ee.Authenticate()
-#ee.Initialize(project = 'gee-project-twi')
+ee.Initialize()#project = 'gee-project-twi')
 
 # Definice oblasti zájmu (Praha)
 geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
