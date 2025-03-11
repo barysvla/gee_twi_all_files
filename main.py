@@ -10,8 +10,8 @@ from scripts.visualization import visualize_map
 #from scripts.export import export_to_drive, export_to_asset
 
 # Autentizace a inicializace GEE
-ee.Authenticate()
-ee.Initialize(project = 'gee-project-twi')
+#ee.Authenticate()
+#ee.Initialize(project = 'gee-project-twi')
 
 # Definice oblasti zájmu (Praha)
 geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
