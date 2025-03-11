@@ -10,7 +10,7 @@ from scripts.visualization import visualize_map
 #from scripts.export import export_to_drive, export_to_asset
 
 # Autentizace a inicializace GEE
-#ee.Authenticate()
+ee.Authenticate()
 #ee.Initialize(project = 'gee-project-twi')
 
 # Definice oblasti zájmu (Praha)
