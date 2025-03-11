@@ -1,6 +1,3 @@
-# Instalace potřebných balíčků (pokud nejsou)
-!pip install earthengine-api geemap
-
 import ee
 import geemap
 from IPython.display import display
