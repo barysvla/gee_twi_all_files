@@ -1,6 +1,8 @@
 import ee
 import geemap
 from IPython.display import display
+from google.cloud import secretmanager
+import json
 
 # Import vlastních modulů
 from scripts.flow_accumulation import compute_flow_accumulation
@@ -10,13 +12,27 @@ from scripts.visualization import visualize_map
 #from scripts.export import export_to_drive, export_to_asset
 
 # Autentizace a inicializace GEE
+def get_service_key():
+    """Načte service account key ze Secret Manageru."""
+    client = secretmanager.SecretManagerServiceClient()
+    name = f"projects/242376316640/secrets/SERVICE_KEY/versions/latest"
+    response = client.access_secret_version(name=name)
+    return json.loads(response.payload.data.decode("UTF-8"))
+
+# Načtení klíče z Google Secret Manager
+service_key = get_service_key()
+
+# Přihlášení do Earth Engine
+credentials = ee.ServiceAccountCredentials(service_key["client_email"], service_key)
+ee.Initialize(credentials)
+
 # Cesta k JSON klíči
-key_path = "/content/gee_twi/service-key.json"
+#key_path = "/content/gee_twi/service-key.json"
 
 # Přihlášení pomocí Service Account
-service_account = "gee-service-twi@gee-project-twi.iam.gserviceaccount.com"
-credentials = ee.ServiceAccountCredentials(service_account, key_path)
-ee.Initialize(credentials)
+#service_account = "gee-service-twi@gee-project-twi.iam.gserviceaccount.com"
+#credentials = ee.ServiceAccountCredentials(service_account, key_path)
+#ee.Initialize(credentials)
 
 #ee.Authenticate()
 #ee.Initialize(project = 'gee-project-twi')
