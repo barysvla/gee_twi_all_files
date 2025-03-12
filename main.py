@@ -13,15 +13,17 @@ from scripts.visualization import visualize_map
 #from scripts.export import export_to_drive, export_to_asset
 
 # Autentizace a inicializace GEE
+# 🔹 Získání klíče, pokud existuje
+service_key_json = userdata.get("SERVICE_KEY")
+
 # 🔹 Uživatel musí ručně nastavit svůj klíč
 #if "SERVICE_KEY" not in userdata:
 #    raise ValueError("❌ Nebyl nalezen Service Key! Zadej ho do `userdata['SERVICE_KEY']`.")
 
-# 🔹 Načtení klíče z Colab secrets
-service_key_json = userdata["SERVICE_KEY"]
+# 🔹 Načtení JSON jako slovník
 service_account_info = json.loads(service_key_json)
 
-# 🔹 Inicializace GEE
+# 🔹 Přihlášení do Google Earth Engine
 credentials = ee.ServiceAccountCredentials(service_account_info['client_email'], service_account_info)
 ee.Initialize(credentials)
 
