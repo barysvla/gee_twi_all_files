@@ -11,7 +11,7 @@ from scripts.visualization import visualize_map
 
 # Autentizace a inicializace GEE
 # Cesta k JSON klíči
-key_path = "/content/service-key.json"
+key_path = "/content/gee_twi/service-key.json"
 
 # Přihlášení pomocí Service Account
 service_account = "gee-service-twi@gee-project-twi.iam.gserviceaccount.com"
