@@ -2,10 +2,10 @@ import ee
 import geemap
 from IPython.display import display
 #from google.cloud import secretmanager
-from google.colab import userdata
-userdata.get('SERVICE_KEY')
-import json
-import os
+#from google.colab import userdata
+#userdata.get('SERVICE_KEY')
+#import json
+#import os
 
 # Import vlastních modulů
 from scripts.flow_accumulation import compute_flow_accumulation
