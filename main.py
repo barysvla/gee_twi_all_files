@@ -50,8 +50,8 @@ from scripts.visualization import visualize_map
 #credentials = ee.ServiceAccountCredentials(service_account, key_path)
 #ee.Initialize(credentials)
 #-------------------------------------------------
-ee.Authenticate()
-ee.Initialize()
+#ee.Authenticate()
+#ee.Initialize()
 #project = 'gee-project-twi'
 #-------------------------------------------------
 # Definice oblasti zájmu (Praha)
