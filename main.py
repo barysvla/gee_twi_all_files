@@ -14,8 +14,8 @@ from scripts.visualization import visualize_map
 
 # Autentizace a inicializace GEE
 # 🔹 Uživatel musí ručně nastavit svůj klíč
-if "SERVICE_KEY" not in userdata:
-    raise ValueError("❌ Nebyl nalezen Service Key! Zadej ho do `userdata['SERVICE_KEY']`.")
+#if "SERVICE_KEY" not in userdata:
+#    raise ValueError("❌ Nebyl nalezen Service Key! Zadej ho do `userdata['SERVICE_KEY']`.")
 
 # 🔹 Načtení klíče z Colab secrets
 service_key_json = userdata["SERVICE_KEY"]
