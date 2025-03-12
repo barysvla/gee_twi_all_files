@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "gee-project-twi",
+  "private_key_id": "f89ae0363302205c3be6dce02b4e713c3cb5fda9",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQCxdF0CF6RnjgW4\nGF4LkFWw4MWb/xrmKCLojLOhqoC/8Qj5GgeNES51d+8OZyNYWop4owVjkDB17pli\n03nCQRIPrVvPDVAa8TlFcyennuDwnpFqkP9W8ClMXynlR77WKoqVaiggr5rfi1O9\nfrcXtkLxWOClZ9kyegXi4JWr/ia8P/4rM3vz2yHgrFt6QJbeSgJRFpe70z+ijWJC\nYm5hi6VHR9iOghOVacRIKx9YAfC8lapGZa147kSvD4PICaA6JtQv/BxHESRDc37J\nO+SDFNF1zr5QwEWlWLTmceCkzgTV1R4/EnsB+09TXqTp0U3Fh3B734OBEMxHeupb\nGylKRwPbAgMBAAECggEAD8u63Q0mXkK/HD8Bsr0l/jj+fhSm2/vl95X8BhT7oZpJ\nYTBsTFCji7ihopeTBtywXMKuH8my9pxxh4wpgh1xXSHiUpDtzigmH+97L9QtqQgv\nC4cH+Ot8fEba9NopEOlNLWBQssV5ihKIjA1JK6bWrfhqWW7gCjqLEZdKMLrOeeKA\n9VL37h7pbivEA0FczvJHQZ5ta63H4dxXyzgoJhbcFBrysITm3/AxfzTGkgvzCB3j\nQioLeXMCc6zpfza3AmaPt/ab5JpAXIwItBtAKzAgehfw0sVZa/BIqVK5tfnX/LKr\nWKnVJyQbPpgiMJUarJ8D+XdKKTwywHntN30PP/VO4QKBgQDnsDVvh7r/2H7p3iXn\nWuf4TPfkmxBqPOk1zrU29tuL2bRQjwmM5j+Vaut9lkjt/8m7dh+W+l55kYAKXNgC\nQA+8sDCKWGz+B3lIYFYrNChM8Jxrc4tyA3VuMEMdSW4WRPV8TssjQudOnxfUOkdV\n59ZozJyrrrm0IKZGlIrT2EXSUQKBgQDEE0jyLSF717UMqbEKkmqd4LSWoOQlQ/zV\nN3TW81573A70VvZso6ZWvI7oy/ux8hMJVNTmUXUwndRoQT8ujWkLtylTVLFNH6fG\nNXffQzztKE6HlJnwlSjzd8OGk8FEN3+g+SKe3htX9QgZ1jskiVjT8JdznP3hXtb2\n4wgpOZNcawKBgQDGs3rAkjmwXm5KCHmdd3tmmiwn5U0or+CagxMrdn9H64gXZvUb\n4AQ8Exyv8onNhAfxPBdPlp4byMt1F7cyBtr4Smr222tuWd6MUgLUvsCpa9na1ZeM\nSqcVv1Jv9Z/yfWXEHJdfQGu8I/l9zBWN+W0LKCBdpVYiw7WW5qJBmUQYYQKBgQCF\nbfI4C4o7soDcSyXVYen34hBCaN6YlXmaxxBVrmvfsdLjZ8JuD7eEUvCVbyqq32cg\n9H+k9E3hdaY0BCKw1T5k4JHYyUuWhjIv6fbXEfSGFuXJ0dAoLfkeJaQDEs10VKgf\nrSpoHhFRe8e1fVnl9SljoNgPrwf9tAJpI/pLw4iKXQKBgQDC2VqMw00dxSdaKIDk\njyKF9KXmeeduovXki+Kst+2U7mqW4Y96nlaaZKDifH3XD5L56Ar8bewasZvyGIfu\nMiBILCYk9gPJIapWPm8ZbF8dD8ZblpKxE1XnQ8MVKOd9Ct2JndSMlcDtA/3L1wXi\nWLEbjXO6UCxaaIySbiPB4TMHSA==\n-----END PRIVATE KEY-----\n",
+  "client_email": "gee-service-twi@gee-project-twi.iam.gserviceaccount.com",
+  "client_id": "104900013036195137165",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/gee-service-twi%40gee-project-twi.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
