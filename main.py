@@ -1,7 +1,8 @@
 import ee
 import geemap
 from IPython.display import display
-from google.cloud import secretmanager
+#from google.cloud import secretmanager
+from google.colab import userdata
 import json
 
 # Import vlastních modulů
@@ -12,19 +13,31 @@ from scripts.visualization import visualize_map
 #from scripts.export import export_to_drive, export_to_asset
 
 # Autentizace a inicializace GEE
-def get_service_key():
-    """Načte service account key ze Secret Manageru."""
-    client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/242376316640/secrets/SERVICE_KEY/versions/latest"
-    response = client.access_secret_version(name=name)
-    return json.loads(response.payload.data.decode("UTF-8"))
+# 🔹 Uživatel musí ručně nastavit svůj klíč
+if "SERVICE_KEY" not in userdata:
+    raise ValueError("❌ Nebyl nalezen Service Key! Zadej ho do `userdata['SERVICE_KEY']`.")
+
+# 🔹 Načtení klíče z Colab secrets
+service_key_json = userdata["SERVICE_KEY"]
+service_account_info = json.loads(service_key_json)
+
+# 🔹 Inicializace GEE
+credentials = ee.ServiceAccountCredentials(service_account_info['client_email'], service_account_info)
+ee.Initialize(credentials)
+
+#def get_service_key():
+#    """Načte service account key ze Secret Manageru."""
+#    client = secretmanager.SecretManagerServiceClient()
+#    name = f"projects/242376316640/secrets/SERVICE_KEY/versions/latest"
+#    response = client.access_secret_version(name=name)
+#    return json.loads(response.payload.data.decode("UTF-8"))
 
 # Načtení klíče z Google Secret Manager
-service_key = get_service_key()
+#service_key = get_service_key()
 
 # Přihlášení do Earth Engine
-credentials = ee.ServiceAccountCredentials(service_key["client_email"], service_key)
-ee.Initialize(credentials)
+#credentials = ee.ServiceAccountCredentials(service_key["client_email"], service_key)
+#ee.Initialize(credentials)
 
 # Cesta k JSON klíči
 #key_path = "/content/gee_twi/service-key.json"
