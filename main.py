@@ -3,6 +3,7 @@ import geemap
 from IPython.display import display
 #from google.cloud import secretmanager
 from google.colab import userdata
+userdata.get('SERVICE_KEY')
 import json
 import os
 
@@ -15,20 +16,20 @@ from scripts.visualization import visualize_map
 
 #-------------------------------------------------
 # Načtení klíče ze Secrets
-service_key_json = os.environ.get('SERVICE_KEY')
+#service_key_json = os.environ.get('SERVICE_KEY')
 
-if service_key_json is None:
-    raise ValueError("❌ Service Account Key není dostupný! Zkontroluj Secrets v Colabu.")
+#if service_key_json is None:
+ #   raise ValueError("❌ Service Account Key není dostupný! Zkontroluj Secrets v Colabu.")
 
 # Uložení klíče do dočasného souboru
-key_path = "/content/service-key.json"
-with open(key_path, "w") as key_file:
-    key_file.write(service_key_json)
+#key_path = "/content/service-key.json"
+#with open(key_path, "w") as key_file:
+#    key_file.write(service_key_json)
 
 # Přihlášení k Earth Engine
-service_account = "gee-service-twi@gee-project-twi.iam.gserviceaccount.com"
-credentials = ee.ServiceAccountCredentials(service_account, key_path)
-ee.Initialize(credentials)
+#service_account = "gee-service-twi@gee-project-twi.iam.gserviceaccount.com"
+#credentials = ee.ServiceAccountCredentials(service_account, key_path)
+#ee.Initialize(credentials)
 
 #-------------------------------------------------
 # Autentizace a inicializace GEE
