@@ -2,8 +2,8 @@ import ee
 import geemap
 from IPython.display import display
 #from google.cloud import secretmanager
-#from google.colab import userdata
-#import json
+from google.colab import userdata
+import json
 
 # Import vlastních modulů
 from scripts.flow_accumulation import compute_flow_accumulation
@@ -15,18 +15,18 @@ from scripts.visualization import visualize_map
 #-------------------------------------------------
 # Autentizace a inicializace GEE
 # 🔹 Získání klíče, pokud existuje
-#service_key_json = userdata.get("SERVICE_KEY")
+service_key_json = userdata.get('SERVICE_KEY')
 
 # 🔹 Uživatel musí ručně nastavit svůj klíč
 #if "SERVICE_KEY" not in userdata:
 #    raise ValueError("❌ Nebyl nalezen Service Key! Zadej ho do `userdata['SERVICE_KEY']`.")
 
 # 🔹 Načtení JSON jako slovník
-#service_account_info = json.loads(service_key_json)
+service_account_info = json.loads(service_key_json)
 
 # 🔹 Přihlášení do Google Earth Engine
-#credentials = ee.ServiceAccountCredentials(service_account_info['client_email'], service_account_info)
-#ee.Initialize(credentials)
+credentials = ee.ServiceAccountCredentials(service_account_info['client_email'], service_account_info)
+ee.Initialize(credentials)
 #-------------------------------------------------
 #def get_service_key():
 #    """Načte service account key ze Secret Manageru."""
