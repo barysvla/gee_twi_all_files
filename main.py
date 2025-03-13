@@ -74,11 +74,11 @@ from scripts.visualization import visualize_map
 #project = 'gee-project-twi'
 #-------------------------------------------------
 # Definice oblasti zájmu (Praha)
-geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
+#geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
 
 # Načtení DEM
 dataset_MERIT = ee.Image("MERIT/Hydro/v1_0_1")
-dem = dataset_MERIT.select("elv").clip(geometry)
+dem = dataset_MERIT.select("elv")#.clip(geometry)
 
 # Výpočet jednotlivých vrstev
 flow_accumulation = compute_flow_accumulation(dem)
