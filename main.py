@@ -28,7 +28,7 @@ slope = compute_slope(dem)
 twi = compute_twi(flow_accumulation, slope)
 
 # Kombinace vrstev
-out = dem.addBands(twi) #.addBands(flow_accumulation).addBands(slope)
+#out = dem.addBands(twi) #.addBands(flow_accumulation).addBands(slope)
 
 # Vizualizace
 vis_params_twi = {
@@ -53,7 +53,7 @@ vis_params_twi = {
 
 # Vytvoření mapy
 Map = visualize_map([
-    (out.select("TWI_scaled"), vis_params_twi, "TWI") #,
+    (twi, vis_params_twi, "TWI") #,
    # (out.select("Slope"), vis_params_slope, "Slope"),
    # (out.select("elv"), vis_params_dem, "Elevation")
 ])
@@ -64,7 +64,7 @@ for layer in Map.layers:
     
 # Export výsledků do Google Drive
 task_drive = ee.batch.Export.image.toDrive(
-    image=out,
+    image=twi,
     description="TWI_Export",
     folder="GEE_Exports",  # Název složky v Google Drive
     fileNamePrefix="TWI_result",
@@ -76,20 +76,6 @@ task_drive = ee.batch.Export.image.toDrive(
 
 task_drive.start()
 print("📤 Export do Google Drive zahájen! Sleduj průběh v GEE Tasks.")
-
-# Export do Google Earth Engine Asset
-task_asset = ee.batch.Export.image.toAsset(
-    image=out,
-    description="TWI_to_Asset",
-    assetId="users/barishevvlad54/TWI_result",
-    region=geometry,
-    scale=90,
-    maxPixels=1e13
-)
-
-task_asset.start()
-print("🌍 Export do Earth Engine Asset zahájen! Sleduj průběh v GEE Tasks.")
-
 
 # Zobrazení mapy v Google Colab
 #Map
