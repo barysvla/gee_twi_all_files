@@ -3,7 +3,6 @@
 
 import ee
 import geemap
-from IPython.display import display
 
 # Import vlastních modulů
 from scripts.flow_accumulation import compute_flow_accumulation
@@ -59,8 +58,8 @@ Map = visualize_map([
 ])
 
 # Ověření, zda mapa obsahuje vrstvy
-for layer in Map.layers:
-    print(layer.name)
+#for layer in Map.layers:
+#    print(layer.name)
     
 # Export výsledků do Google Drive
 task_drive = ee.batch.Export.image.toDrive(
