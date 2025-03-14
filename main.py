@@ -76,6 +76,3 @@ task_drive = ee.batch.Export.image.toDrive(
 
 task_drive.start()
 print("📤 Export do Google Drive zahájen! Sleduj průběh v GEE Tasks.")
-
-# Zobrazení mapy v Google Colab
-#Map
