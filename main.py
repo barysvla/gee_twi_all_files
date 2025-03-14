@@ -1,6 +1,3 @@
-# Instalace potřebných balíčků (pokud nejsou)
-#!pip install earthengine-api geemap
-
 import ee
 import geemap
 
@@ -11,10 +8,10 @@ from scripts.twi import compute_twi
 from scripts.visualization import visualize_map
 #from scripts.export import export_to_drive, export_to_asset
 
-# Inicializace GEE
+# !Inicializace GEE!
 ee.Initialize(project = 'gee-project-twi')
 
-# Definice oblasti zájmu (Praha)
+# !Definice oblasti zájmu!
 geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
 
 # Získání středu polygonu a nastavení zoomu
@@ -79,4 +76,4 @@ task_drive = ee.batch.Export.image.toDrive(
 )
 
 task_drive.start()
-print("📤 Export do Google Drive zahájen! Sleduj průběh v GEE Tasks.")
+print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
