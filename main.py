@@ -17,6 +17,9 @@ ee.Initialize(project = 'gee-project-twi')
 # Definice oblasti zájmu (Praha)
 geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
 
+# Získání středu polygonu a nastavení zoomu
+center = geometry.centroid().coordinates().getInfo()
+
 # Načtení DEM
 dataset_MERIT = ee.Image("MERIT/Hydro/v1_0_1")
 dem = dataset_MERIT.select("elv").clip(geometry)
@@ -57,9 +60,11 @@ Map = visualize_map([
    # (out.select("elv"), vis_params_dem, "Elevation")
 ])
 
+Map.setCenter(center[0], center[1], zoom=12)
+
 # Ověření, zda mapa obsahuje vrstvy
 #for layer in Map.layers:
-#    print(layer.name)
+#    print(f"\t{layer.name}")
     
 # Export výsledků do Google Drive
 task_drive = ee.batch.Export.image.toDrive(
