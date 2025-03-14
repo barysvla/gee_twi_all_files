@@ -62,9 +62,34 @@ Map = visualize_map([
 for layer in Map.layers:
     print(layer.name)
     
-# Export výsledků
-export_to_drive(twi, "TWI_Export", "TWI_result", geometry)
-#export_to_asset(twi, "users/tvoje_jmeno/TWI_result", geometry)
+# Export výsledků do Google Drive
+task_drive = ee.batch.Export.image.toDrive(
+    image=out,
+    description="TWI_Export",
+    folder="GEE_Exports",  # Název složky v Google Drive
+    fileNamePrefix="TWI_result",
+    region=geometry,
+    scale=90,  # Rozlišení odpovídající DEM
+    maxPixels=1e13,
+    fileFormat="GeoTIFF"
+)
+
+task_drive.start()
+print("📤 Export do Google Drive zahájen! Sleduj průběh v GEE Tasks.")
+
+# Export do Google Earth Engine Asset
+task_asset = ee.batch.Export.image.toAsset(
+    image=out,
+    description="TWI_to_Asset",
+    assetId="users/barishevvlad54/TWI_result",
+    region=geometry,
+    scale=90,
+    maxPixels=1e13
+)
+
+task_asset.start()
+print("🌍 Export do Earth Engine Asset zahájen! Sleduj průběh v GEE Tasks.")
+
 
 # Zobrazení mapy v Google Colab
 #Map
