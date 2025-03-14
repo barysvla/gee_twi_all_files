@@ -13,7 +13,7 @@ from scripts.visualization import visualize_map
 #from scripts.export import export_to_drive, export_to_asset
 
 # Inicializace GEE
-ee.Initialize(project = 'ee-baryshevvlad')
+ee.Initialize(project = 'gee-project-twi')
 
 # Definice oblasti zájmu (Praha)
 geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
@@ -28,7 +28,7 @@ slope = compute_slope(dem)
 twi = compute_twi(flow_accumulation, slope)
 
 # Kombinace vrstev
-out = dem.addBands(flow_accumulation).addBands(slope).addBands(twi)
+out = dem.addBands(twi) #.addBands(flow_accumulation).addBands(slope)
 
 # Vizualizace
 vis_params_twi = {
@@ -38,24 +38,24 @@ vis_params_twi = {
     "opacity": 1,
     "palette": ["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
 }
-vis_params_slope = {
-    "bands": ["Slope"],
-    "min": 0,
-    "max": 90,
-    "palette": ["yellow", "red"]
-}
-vis_params_dem = {
-    "bands": ["elv"],
-    "min": 0,
-    "max": 3000,
-    "palette": ["black", "white"]
-}
+#vis_params_slope = {
+#    "bands": ["Slope"],
+#    "min": 0,
+#    "max": 90,
+#    "palette": ["yellow", "red"]
+#}
+#vis_params_dem = {
+#    "bands": ["elv"],
+#    "min": 0,
+#    "max": 3000,
+#    "palette": ["black", "white"]
+#}
 
 # Vytvoření mapy
 Map = visualize_map([
-    (out.select("TWI_scaled"), vis_params_twi, "TWI"),
-    (out.select("Slope"), vis_params_slope, "Slope"),
-    (out.select("elv"), vis_params_dem, "Elevation")
+    (out.select("TWI_scaled"), vis_params_twi, "TWI") #,
+   # (out.select("Slope"), vis_params_slope, "Slope"),
+   # (out.select("elv"), vis_params_dem, "Elevation")
 ])
 
 # Ověření, zda mapa obsahuje vrstvy
@@ -63,8 +63,8 @@ for layer in Map.layers:
     print(layer.name)
     
 # Export výsledků
-#export_to_drive(twi, "TWI_Export", "TWI_result", geometry)
+export_to_drive(twi, "TWI_Export", "TWI_result", geometry)
 #export_to_asset(twi, "users/tvoje_jmeno/TWI_result", geometry)
 
 # Zobrazení mapy v Google Colab
-Map
+#Map
