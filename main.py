@@ -9,7 +9,7 @@ from scripts.visualization import visualize_map
 #from scripts.export import export_to_drive, export_to_asset
 
 # !Inicializace GEE!
-ee.Initialize(project = 'gee-project-twi') # TADY zadat ID projektu
+ee.Initialize(project = 'TADY zadat ID projektu')
 
 # !Definice zájmového území!
 geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
