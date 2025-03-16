@@ -9,9 +9,9 @@ from scripts.visualization import visualize_map
 #from scripts.export import export_to_drive, export_to_asset
 
 # !Inicializace GEE!
-ee.Initialize(project = 'gee-project-twi')
+ee.Initialize(project = 'gee-project-twi') # TADY zadat ID projektu
 
-# !Definice oblasti zájmu!
+# !Definice zájmového území!
 geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
 
 # Získání středu polygonu a nastavení zoomu
