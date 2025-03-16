@@ -64,16 +64,16 @@ Map.setCenter(center[0], center[1], zoom=12)
 #    print(f"\t{layer.name}")
     
 # Export výsledků do Google Drive
-task_drive = ee.batch.Export.image.toDrive(
-    image=twi,
-    description="TWI_Export",
-    folder="GEE_Exports",  # Název složky v Google Drive
-    fileNamePrefix="TWI_result",
-    region=geometry,
-    scale=90,  # Rozlišení odpovídající DEM
-    maxPixels=1e13,
-    fileFormat="GeoTIFF"
-)
+# task_drive = ee.batch.Export.image.toDrive(
+#     image=twi,
+#     description="TWI_Export",
+#     folder="GEE_Exports",  # Název složky v Google Drive
+#     fileNamePrefix="TWI_result",
+#     region=geometry,
+#     scale=90,  # Rozlišení odpovídající DEM
+#     maxPixels=1e13,
+#     fileFormat="GeoTIFF"
+# )
 
-task_drive.start()
-print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+# task_drive.start()
+# print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
