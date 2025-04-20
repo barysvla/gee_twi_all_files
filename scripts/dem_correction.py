@@ -15,10 +15,28 @@ def get_neighbors(i, j, shape):
     return neighbors
 
 
+def detect_depressions(dem):
+    """
+    Detect depressions in the DEM by checking if a cell is lower than all its neighbors.
+    Returns a boolean mask with True where depressions are detected.
+    """
+    shape = dem.shape
+    mask = np.zeros(shape, dtype=bool)
+    for i in range(1, shape[0] - 1):
+        for j in range(1, shape[1] - 1):
+            center = dem[i, j]
+            neighbors = [dem[ni, nj] for ni, nj in get_neighbors(i, j, shape)]
+            if all(center < n for n in neighbors):
+                mask[i, j] = True
+    return mask
+
+
 def carve_depressions(dem):
     """
-    Perform depression correction using a priority-flood based carving algorithm.
-    Based on Barták's description.
+    Carving method:
+    - This method simulates draining of depressions by "cutting" narrow channels from inside the depression toward lower terrain.
+    - It uses a priority-flood algorithm that starts from the edges and works inward.
+    - Cells inside pits are raised only as much as necessary to allow outflow, preserving as much of the terrain as possible.
     """
     dem = dem.copy()
     shape = dem.shape
@@ -50,10 +68,27 @@ def carve_depressions(dem):
 
 def fill_remaining_depressions(dem, carved):
     """
-    Optional fallback: fill residual depressions.
-    Currently a placeholder (returns carved output directly).
+    Filling method:
+    - This method raises the elevation of cells inside remaining pits (after carving) to allow water to flow out.
+    - It uses a simple iterative method: if a cell is lower than all its neighbors, it is raised to the lowest neighbor's value.
+    - This ensures all cells can drain, but may lead to flat areas.
     """
-    return carved  # In future: implement true fill if needed
+    filled = carved.copy()
+    shape = filled.shape
+    changed = True
+
+    while changed:
+        changed = False
+        for i in range(1, shape[0] - 1):
+            for j in range(1, shape[1] - 1):
+                center = filled[i, j]
+                neighbors = [filled[ni, nj] for ni, nj in get_neighbors(i, j, shape)]
+                min_neighbor = min(neighbors)
+                if center < min_neighbor:
+                    filled[i, j] = min_neighbor
+                    changed = True
+
+    return filled
 
 
 def correct_dem(dem):
@@ -70,14 +105,28 @@ def correct_dem(dem):
 
 # if __name__ == "__main__":
 #     import matplotlib.pyplot as plt
-#     # Load demo DEM
-#     demo_dem = np.load("demo_dem.npy")
+#     # Create demo DEM directly
+#     demo_dem = np.array([
+#         [100, 100, 100, 100, 100],
+#         [100,  95,  95,  95, 100],
+#         [100,  95,  90,  95, 100],
+#         [100,  95,  95,  95, 100],
+#         [100, 100, 100, 100, 100]
+#     ], dtype=np.float32)
+
+#     mask = detect_depressions(demo_dem)
+#     print("Depression mask:")
+#     print(mask.astype(int))
+
 #     corrected = correct_dem(demo_dem)
 
 #     # Show before and after
-#     fig, axs = plt.subplots(1, 2, figsize=(10, 4))
+#     fig, axs = plt.subplots(1, 3, figsize=(15, 4))
 #     axs[0].imshow(demo_dem, cmap="terrain")
 #     axs[0].set_title("Original DEM")
-#     axs[1].imshow(corrected, cmap="terrain")
-#     axs[1].set_title("Corrected DEM")
+#     axs[1].imshow(mask, cmap="gray")
+#     axs[1].set_title("Depression Mask")
+#     axs[2].imshow(corrected, cmap="terrain")
+#     axs[2].set_title("Corrected DEM")
+#     plt.tight_layout()
 #     plt.show()
