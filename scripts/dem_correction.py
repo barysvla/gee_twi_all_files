@@ -68,16 +68,16 @@ def correct_dem(dem):
     return final
 
 
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    # Load demo DEM
-    demo_dem = np.load("demo_dem.npy")
-    corrected = correct_dem(demo_dem)
+# if __name__ == "__main__":
+#     import matplotlib.pyplot as plt
+#     # Load demo DEM
+#     demo_dem = np.load("demo_dem.npy")
+#     corrected = correct_dem(demo_dem)
 
-    # Show before and after
-    fig, axs = plt.subplots(1, 2, figsize=(10, 4))
-    axs[0].imshow(demo_dem, cmap="terrain")
-    axs[0].set_title("Original DEM")
-    axs[1].imshow(corrected, cmap="terrain")
-    axs[1].set_title("Corrected DEM")
-    plt.show()
+#     # Show before and after
+#     fig, axs = plt.subplots(1, 2, figsize=(10, 4))
+#     axs[0].imshow(demo_dem, cmap="terrain")
+#     axs[0].set_title("Original DEM")
+#     axs[1].imshow(corrected, cmap="terrain")
+#     axs[1].set_title("Corrected DEM")
+#     plt.show()
