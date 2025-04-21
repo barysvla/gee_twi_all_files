@@ -70,18 +70,26 @@ def visualize_mfd8_direction(flow_array, direction_names=None):
     plt.show()
 
 def visualize_mfd8_combined(flow_array):
-    """
+        """
     Visualize combined MFD8 direction as a single image using dominant direction.
     Parameters:
         flow_array (ndarray): 3D array of shape (rows, cols, 8)
     """
     import matplotlib.pyplot as plt
     import numpy as np
+    import matplotlib.patches as mpatches
 
+    direction_labels = ["NE", "E", "SE", "S", "SW", "W", "NW", "N"]
     dominant = np.argmax(flow_array, axis=2)
+
     fig, ax = plt.subplots(figsize=(6, 6))
-    im = ax.imshow(dominant, cmap="twilight", interpolation="none")
+    im = ax.imshow(dominant, cmap="tab10", interpolation="none")
     ax.set_title("MFD8 Dominant Flow Direction (by max weight)")
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    # Legend with direction names
+    handles = [mpatches.Patch(color=plt.cm.tab10(i), label=direction_labels[i]) for i in range(8)]
+    fig.colorbar(im, ax=ax, ticks=range(8), fraction=0.046, pad=0.04)
+    ax.legend(handles=handles, title="Direction", loc="lower right", bbox_to_anchor=(1.4, 0))
+
     plt.tight_layout()
     plt.show()
