@@ -50,7 +50,7 @@ def compute_flow_direction_d8(dem):
     return direction
 
 
-def visualize_flow_direction(direction):
+def visualize_d8_direction(direction):
     """
     Visualize D8 flow direction codes as an image.
     Parameters:
