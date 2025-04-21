@@ -46,7 +46,7 @@ def compute_flow_direction_mfd8(dem, p=1.1):
 
     return flow
 
-def visualize_mfd8_distribution(flow_array, direction_names=None):
+def visualize_mfd8_direction(flow_array, direction_names=None):
     """
     Visualize the MFD8 flow proportions in 8 directions as subplots.
 
