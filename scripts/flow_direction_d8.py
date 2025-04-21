@@ -13,6 +13,7 @@ D8_DIRECTIONS = [
 ]
 
 D8_CODES = [128, 1, 2, 4, 8, 16, 32, 64]
+MIN_DROP_THRESHOLD = 1e-4  # Minimum drop to be considered valid
 
 def compute_flow_direction_d8(dem):
     """
@@ -32,8 +33,8 @@ def compute_flow_direction_d8(dem):
     for i in range(1, rows - 1):
         for j in range(1, cols - 1):
             center = dem[i, j]
-            max_drop = 0
-            best_code = 0
+            max_drop = -np.inf
+            best_indices = []
 
             for idx, (di, dj) in enumerate(D8_DIRECTIONS):
                 ni, nj = i + di, j + dj
@@ -41,9 +42,17 @@ def compute_flow_direction_d8(dem):
                 distance = np.sqrt(di**2 + dj**2)  # Euclidean distance
                 drop = (center - neighbor) / distance
 
-                if drop > max_drop:
+                if drop > max_drop and drop > MIN_DROP_THRESHOLD:
                     max_drop = drop
-                    best_code = D8_CODES[idx]
+                    best_indices = [idx]
+                elif drop == max_drop:
+                    best_indices.append(idx)
+
+            if best_indices:
+                chosen_idx = np.random.choice(best_indices)
+                best_code = D8_CODES[chosen_idx]
+            else:
+                best_code = 0  # No valid flow direction
 
             direction[i, j] = best_code
 
@@ -53,6 +62,7 @@ def compute_flow_direction_d8(dem):
 def visualize_d8_direction(direction):
     """
     Visualize D8 flow direction codes as an image.
+
     Parameters:
         direction (ndarray): 2D array of direction codes.
     """
