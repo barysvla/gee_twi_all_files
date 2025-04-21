@@ -45,3 +45,26 @@ def compute_flow_direction_mfd8(dem, p=1.1):
                 flow[i, j, :] = np.array(slopes) / total
 
     return flow
+
+def visualize_mfd8_distribution(flow_array, direction_names=None):
+    """
+    Visualize the MFD8 flow proportions in 8 directions as subplots.
+
+    Parameters:
+        flow_array (ndarray): 3D array of shape (rows, cols, 8)
+        direction_names (list of str): optional labels for directions
+    """
+    import matplotlib.pyplot as plt
+    fig, axs = plt.subplots(2, 4, figsize=(16, 6))
+    axs = axs.flatten()
+    
+    if direction_names is None:
+        direction_names = ["NE", "E", "SE", "S", "SW", "W", "NW", "N"]
+
+    for i in range(8):
+        axs[i].imshow(flow_array[:, :, i], cmap="Blues")
+        axs[i].set_title(f"Flow to {direction_names[i]}")
+        axs[i].axis('off')
+
+    plt.tight_layout()
+    plt.show()
