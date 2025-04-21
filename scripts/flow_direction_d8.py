@@ -34,7 +34,7 @@ def compute_flow_direction_d8(dem):
         for j in range(1, cols - 1):
             center = dem[i, j]
             max_drop = -np.inf
-            best_indices = []
+            best_idx = -1
 
             for idx, (di, dj) in enumerate(D8_DIRECTIONS):
                 ni, nj = i + di, j + dj
@@ -44,13 +44,10 @@ def compute_flow_direction_d8(dem):
 
                 if drop > max_drop and drop > MIN_DROP_THRESHOLD:
                     max_drop = drop
-                    best_indices = [idx]
-                elif drop == max_drop:
-                    best_indices.append(idx)
+                    best_idx = idx
 
-            if best_indices:
-                chosen_idx = np.random.choice(best_indices)
-                best_code = D8_CODES[chosen_idx]
+            if best_idx >= 0:
+                best_code = D8_CODES[best_idx]
             else:
                 best_code = 0  # No valid flow direction
 
