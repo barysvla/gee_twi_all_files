@@ -70,7 +70,7 @@ def visualize_mfd8_direction(flow_array, direction_names=None):
     plt.show()
 
 def visualize_mfd8_combined(flow_array):
-        """
+    """
     Visualize combined MFD8 direction as a single image using dominant direction.
     Parameters:
         flow_array (ndarray): 3D array of shape (rows, cols, 8)
