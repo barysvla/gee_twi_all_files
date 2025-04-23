@@ -28,6 +28,7 @@ def detect_depressions(dem):
             neighbors = [dem[ni, nj] for ni, nj in get_neighbors(i, j, shape)]
             if all(center < n for n in neighbors):
                 mask[i, j] = True
+    print(f"Total depressions detected: {np.sum(mask)}")
     return mask
 
 
