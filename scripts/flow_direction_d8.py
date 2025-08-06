@@ -1,69 +1,63 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
-# D8 direction codes and neighbor offsets
-D8_DIRECTIONS = [
-    (-1, 1),  # 128 NE
-    (0, 1),   # 1   E
-    (1, 1),   # 2   SE
-    (1, 0),   # 4   S
-    (1, -1),  # 8   SW
-    (0, -1),  # 16  W
-    (-1, -1), # 32  NW
-    (-1, 0)   # 64  N
+# D8 directional offsets and codes
+D8_OFFSETS = [
+    (-1, 1),   # NE = 128
+    (0, 1),    # E  = 1
+    (1, 1),    # SE = 2
+    (1, 0),    # S  = 4
+    (1, -1),   # SW = 8
+    (0, -1),   # W  = 16
+    (-1, -1),  # NW = 32
+    (-1, 0)    # N  = 64
 ]
-
 D8_CODES = [128, 1, 2, 4, 8, 16, 32, 64]
-MIN_DROP_THRESHOLD = 1e-4  # Minimum drop to be considered valid
+D8_DIST = [np.sqrt(2), 1, np.sqrt(2), 1, np.sqrt(2), 1, np.sqrt(2), 1]
 
-def compute_flow_direction_d8(dem):
+def compute_d8_direction(dem: np.ndarray) -> np.ndarray:
     """
-    Compute D8 flow direction for each cell in DEM.
-    Each cell is assigned a direction code indicating the direction
-    of steepest descent toward one of its 8 neighbors.
+    Compute D8 flow direction from a DEM array.
+    Each cell flows to the neighbor with the steepest downslope.
 
     Parameters:
-        dem (ndarray): 2D numpy array representing the elevation model.
+        dem (2D np.ndarray): Input DEM as a NumPy array.
 
     Returns:
-        ndarray: 2D array of same shape with D8 direction codes (uint8).
+        flow_dir (2D np.ndarray): D8 direction codes for each cell.
     """
-    direction = np.zeros_like(dem, dtype=np.uint8)
     rows, cols = dem.shape
+    flow_dir = np.zeros((rows, cols), dtype=np.uint8)
 
     for i in range(1, rows - 1):
         for j in range(1, cols - 1):
+            max_slope = -np.inf
+            direction = 0
             center = dem[i, j]
-            max_drop = -np.inf
-            best_idx = -1
 
-            for idx, (di, dj) in enumerate(D8_DIRECTIONS):
-                ni, nj = i + di, j + dj
+            # Check all 8 neighbors
+            for k, (dy, dx) in enumerate(D8_OFFSETS):
+                ni, nj = i + dy, j + dx
                 neighbor = dem[ni, nj]
-                distance = np.sqrt(di**2 + dj**2)  # Euclidean distance
-                drop = (center - neighbor) / distance
+                dz = center - neighbor
+                slope = dz / D8_DIST[k]
 
-                if drop > max_drop and drop > MIN_DROP_THRESHOLD:
-                    max_drop = drop
-                    best_idx = idx
+                # Save the steepest downslope direction
+                if slope > max_slope and slope > 0:
+                    max_slope = slope
+                    direction = D8_CODES[k]
 
-            if best_idx >= 0:
-                best_code = D8_CODES[best_idx]
-            else:
-                best_code = 0  # No valid flow direction
+            flow_dir[i, j] = direction
 
-            direction[i, j] = best_code
+    return flow_dir
 
-    return direction
-
-
-def visualize_d8_direction(direction):
+def visualize_d8_direction(direction: np.ndarray):
     """
-    Visualize D8 flow direction codes as an image.
+    Visualize D8 flow direction codes using matplotlib.
 
     Parameters:
-        direction (ndarray): 2D array of direction codes.
+        direction (2D np.ndarray): Output from compute_d8_direction.
     """
-    import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(6, 6))
     im = ax.imshow(direction, cmap="twilight", interpolation="none")
     ax.set_title("D8 Flow Direction")
