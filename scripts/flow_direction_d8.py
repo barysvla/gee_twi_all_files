@@ -15,7 +15,7 @@ D8_OFFSETS = [
 D8_CODES = [128, 1, 2, 4, 8, 16, 32, 64]
 D8_DIST = [np.sqrt(2), 1, np.sqrt(2), 1, np.sqrt(2), 1, np.sqrt(2), 1]
 
-def compute_d8_direction(dem: np.ndarray) -> np.ndarray:
+def compute_d8_direction_essential(dem: np.ndarray) -> np.ndarray:
     """
     Compute D8 flow direction from a DEM array.
     Each cell flows to the neighbor with the steepest downslope.
