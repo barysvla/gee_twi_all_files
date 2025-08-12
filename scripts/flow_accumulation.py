@@ -1,90 +1,80 @@
-# import ee
-
-# def compute_flow_accumulation(dem):
-#     """
-#     Výpočet akumulace toku na základě DEM.
-#     Zde lze implementovat vlastní metodu (např. D8 algoritmus).
-#     """
-#     # Zatím jen načítání existující vrstvy
-#     dataset_MERIT = ee.Image('MERIT/Hydro/v1_0_1')
-#     flowAccumulation_MERIT = dataset_MERIT.select('upa')
-    
-#     return flowAccumulation_MERIT.rename("Flow_Accumulation")
-
 import ee
-import tempfile
-import requests
-import rasterio
-import numpy as np
-import geemap
-from pysheds.grid import Grid
 
-
-def compute_flow_accumulation(dem_image, geometry=None, scale=90, routing='d8'):
+def compute_flow_accumulation(dem):
     """
-    Compute flow accumulation from an Earth Engine DEM image using PySheds
-    and return the result as an ee.Image.
-
-    Parameters
-    ----------
-    dem_image : ee.Image
-        DEM as Earth Engine image.
-    geometry : ee.Geometry, optional
-        Area of interest to clip before exporting.
-    scale : int
-        Resolution in meters for export from GEE.
-    routing : str
-        Flow routing algorithm ('d8' or 'mfd').
-
-    Returns
-    -------
-    ee.Image
-        Flow accumulation as Earth Engine image.
+    Výpočet akumulace toku na základě DEM.
+    Zde lze implementovat vlastní metodu (např. D8 algoritmus).
     """
+    # Zatím jen načítání existující vrstvy
+    dataset_MERIT = ee.Image('MERIT/Hydro/v1_0_1')
+    flowAccumulation_MERIT = dataset_MERIT.select('upa')
+    
+    return flowAccumulation_MERIT.rename("Flow_Accumulation")
 
-    # 1) Export DEM from Earth Engine to temporary GeoTIFF
-    tmpfile = tempfile.NamedTemporaryFile(suffix='.tif', delete=False)
-    path_tif = tmpfile.name
-    tmpfile.close()
+# import ee
+# import geemap
+# import numpy as np
+# from pysheds.grid import Grid
+# import rasterio
+# import tempfile
+# import os
 
-    url = dem_image.getDownloadURL({
-        'scale': scale,
-        'region': geometry or dem_image.geometry(),
-        'format': 'GEO_TIFF'
-    })
+# def compute_flow_accumulation(dem_img, scale=90):
+#     """
+#     Compute flow accumulation from an ee.Image DEM using PySheds.
 
-    r = requests.get(url, stream=True)
-    with open(path_tif, 'wb') as f:
-        for chunk in r.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
+#     Parameters:
+#         dem_img (ee.Image): Input DEM as Earth Engine Image.
+#         scale (int): Resolution for export in meters.
 
-    # 2) Load DEM in PySheds
-    grid = Grid.from_raster(path_tif)
-    dem = grid.read_raster(path_tif).astype(np.float32)
+#     Returns:
+#         ee.Image: Flow accumulation as Earth Engine Image.
+#     """
 
-    # Set nodata if missing
-    with rasterio.open(path_tif) as src:
-        profile = src.profile
-        nodata_value = src.nodata if src.nodata is not None else -9999.0
+#     # 1) Temporary file for DEM
+#     tmp_dir = tempfile.mkdtemp()
+#     dem_path = os.path.join(tmp_dir, "dem.tif")
 
-    # 3) Condition DEM
-    dem_filled = grid.fill_depressions(dem)
-    dem_conditioned = grid.resolve_flats(dem_filled)
+#     # 2) Export DEM from GEE to GeoTIFF
+#     geemap.ee_export_image(
+#         dem_img,
+#         filename=dem_path,
+#         scale=scale,
+#         file_per_band=False
+#     )
 
-    # 4) Compute flow direction and accumulation
-    if routing.lower() == 'd8':
-        fdir = grid.flowdir(dem_conditioned)
-        acc = grid.accumulation(fdir)
-    elif routing.lower() == 'mfd':
-        fdir = grid.flowdir(dem_conditioned, routing='mfd')
-        acc = grid.accumulation(fdir, routing='mfd')
-    else:
-        raise ValueError("routing must be 'd8' or 'mfd'")
+#     # 3) Load into PySheds grid
+#     grid = Grid.from_raster(dem_path)
+#     dem_np = grid.read_raster(dem_path).astype(np.float32)
 
-    # 5) Convert NumPy array back to ee.Image
-    acc_img = geemap.numpy_to_ee(acc.astype(np.float32),
-                                 transform=profile['transform'],
-                                 crs=profile['crs'])
+#     # Nodata value
+#     with rasterio.open(dem_path) as src:
+#         transform = src.transform
+#         crs = str(src.crs)
+#         nodata_val = src.nodata if src.nodata is not None else -9999.0
 
-    return acc_img
+#     # Replace NaN with nodata
+#     dem_np = np.nan_to_num(dem_np, nan=nodata_val)
+
+#     # 4) Hydrological conditioning
+#     flooded = grid.fill_depressions(dem_np)
+#     inflated = grid.resolve_flats(flooded)
+
+#     # 5) Flow direction and accumulation (default D8)
+#     fdir = grid.flowdir(inflated)       # <-- same as in your Colab
+#     acc = grid.accumulation(fdir)
+
+#     # 6) Convert back to ee.Image
+#         # 6) Převod zpět na ee.Image
+#     transform_tuple = (
+#         transform.a, transform.b, transform.c,
+#         transform.d, transform.e, transform.f
+#     )
+
+#     acc_img = geemap.numpy_to_ee(
+#         acc.astype(np.float32),
+#         transform=transform_tuple,
+#         crs=crs
+#     )
+
+#     return acc_img.rename('FlowAcc_D8')
