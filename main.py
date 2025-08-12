@@ -10,7 +10,7 @@ from scripts.visualization import visualize_map
 #from scripts.export import export_to_drive, export_to_asset
 
 # !Inicializace GEE!
-ee.Initialize(project = 'TADY zadat ID projektu')
+ee.Initialize(project = 'gee-project-twi')
 
 # !Definice zájmového území!
 geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
@@ -23,7 +23,8 @@ dataset_MERIT = ee.Image("MERIT/Hydro/v1_0_1")
 dem = dataset_MERIT.select("elv").clip(geometry)
 
 # Výpočet jednotlivých vrstev
-flow_accumulation = compute_flow_accumulation(dem)
+compute_flow_accumulation_hydro = compute_flow_accumulation_hydro(dem)
+compute_flow_accumulation_pysheds = compute_flow_accumulation_pysheds(dem)
 slope = compute_slope(dem)
 twi_hydro = compute_twi(flow_accumulation_hydro, slope)
 twi_pysheds = compute_twi(flow_accumulation_pysheds, slope)
