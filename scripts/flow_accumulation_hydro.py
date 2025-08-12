@@ -1,6 +1,6 @@
 import ee
 
-def compute_flow_accumulation(dem):
+def compute_flow_accumulation_hydro(dem):
     """
     Výpočet akumulace toku na základě DEM.
     Zde lze implementovat vlastní metodu (např. D8 algoritmus).
