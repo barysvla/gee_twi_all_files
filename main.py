@@ -26,8 +26,8 @@ dem = dataset_MERIT.select("elv").clip(geometry)
 compute_flow_accumulation_hydro = compute_flow_accumulation_hydro(dem)
 compute_flow_accumulation_pysheds = compute_flow_accumulation_pysheds(dem)
 slope = compute_slope(dem)
-twi_hydro = compute_twi(flow_accumulation_hydro, slope)
-twi_pysheds = compute_twi(flow_accumulation_pysheds, slope)
+twi_hydro = compute_twi(compute_flow_accumulation_hydro, slope)
+twi_pysheds = compute_twi(compute_flow_accumulation_pysheds, slope)
 
 # Kombinace vrstev
 #out = dem.addBands(twi) #.addBands(flow_accumulation).addBands(slope)
@@ -81,4 +81,5 @@ Map.setCenter(center[0], center[1], zoom=12)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
