@@ -13,18 +13,22 @@
 
 import ee
 import tempfile
+import requests
 import rasterio
 import numpy as np
+import geemap
 from pysheds.grid import Grid
+
 
 def compute_flow_accumulation(dem_image, geometry=None, scale=90, routing='d8'):
     """
-    Compute flow accumulation from an Earth Engine DEM image using PySheds.
+    Compute flow accumulation from an Earth Engine DEM image using PySheds
+    and return the result as an ee.Image.
 
     Parameters
     ----------
     dem_image : ee.Image
-        DEM as Earth Engine image (already preprocessed or clipped to AOI).
+        DEM as Earth Engine image.
     geometry : ee.Geometry, optional
         Area of interest to clip before exporting.
     scale : int
@@ -34,11 +38,11 @@ def compute_flow_accumulation(dem_image, geometry=None, scale=90, routing='d8'):
 
     Returns
     -------
-    numpy.ndarray
-        Flow accumulation array.
+    ee.Image
+        Flow accumulation as Earth Engine image.
     """
 
-    # 1) Export DEM from Earth Engine to a temporary GeoTIFF
+    # 1) Export DEM from Earth Engine to temporary GeoTIFF
     tmpfile = tempfile.NamedTemporaryFile(suffix='.tif', delete=False)
     path_tif = tmpfile.name
     tmpfile.close()
@@ -49,22 +53,22 @@ def compute_flow_accumulation(dem_image, geometry=None, scale=90, routing='d8'):
         'format': 'GEO_TIFF'
     })
 
-    import requests
     r = requests.get(url, stream=True)
     with open(path_tif, 'wb') as f:
         for chunk in r.iter_content(chunk_size=8192):
             if chunk:
                 f.write(chunk)
 
-    # 2) Read DEM with PySheds
+    # 2) Load DEM in PySheds
     grid = Grid.from_raster(path_tif)
     dem = grid.read_raster(path_tif).astype(np.float32)
 
-    # Set nodata if not defined
+    # Set nodata if missing
     with rasterio.open(path_tif) as src:
+        profile = src.profile
         nodata_value = src.nodata if src.nodata is not None else -9999.0
 
-    # 3) Condition DEM (fill depressions, resolve flats)
+    # 3) Condition DEM
     dem_filled = grid.fill_depressions(dem)
     dem_conditioned = grid.resolve_flats(dem_filled)
 
@@ -78,4 +82,9 @@ def compute_flow_accumulation(dem_image, geometry=None, scale=90, routing='d8'):
     else:
         raise ValueError("routing must be 'd8' or 'mfd'")
 
-    return acc
+    # 5) Convert NumPy array back to ee.Image
+    acc_img = geemap.numpy_to_ee(acc.astype(np.float32),
+                                 transform=profile['transform'],
+                                 crs=profile['crs'])
+
+    return acc_img
