@@ -6,7 +6,7 @@ import rasterio
 import tempfile
 import os
 
-def compute_flow_accumulation(dem_img, scale=90):
+def compute_flow_accumulation_pysheds(dem_img, scale=90):
     """
     Compute flow accumulation from an ee.Image DEM using PySheds.
 
