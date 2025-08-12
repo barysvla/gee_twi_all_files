@@ -2,7 +2,8 @@ import ee
 import geemap
 
 # Import vlastních modulů
-from scripts.flow_accumulation import compute_flow_accumulation
+from scripts.flow_accumulation_hydro import compute_flow_accumulation_hydro
+from scripts.flow_accumulation_pysheds import compute_flow_accumulation_pysheds
 from scripts.slope import compute_slope
 from scripts.twi import compute_twi
 from scripts.visualization import visualize_map
@@ -24,7 +25,8 @@ dem = dataset_MERIT.select("elv").clip(geometry)
 # Výpočet jednotlivých vrstev
 flow_accumulation = compute_flow_accumulation(dem)
 slope = compute_slope(dem)
-twi = compute_twi(flow_accumulation, slope)
+twi_hydro = compute_twi(flow_accumulation_hydro, slope)
+twi_pysheds = compute_twi(flow_accumulation_pysheds, slope)
 
 # Kombinace vrstev
 #out = dem.addBands(twi) #.addBands(flow_accumulation).addBands(slope)
@@ -52,7 +54,8 @@ vis_params_twi = {
 
 # Vytvoření mapy
 Map = visualize_map([
-    (twi, vis_params_twi, "TWI") #,
+    (twi_hydro, vis_params_twi, "TWI_merit_hydro"),
+    (twi_pysheds, vis_params_twi, "TWI_pysheds")#,
    # (out.select("Slope"), vis_params_slope, "Slope"),
    # (out.select("elv"), vis_params_dem, "Elevation")
 ])
@@ -77,3 +80,4 @@ Map.setCenter(center[0], center[1], zoom=12)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
