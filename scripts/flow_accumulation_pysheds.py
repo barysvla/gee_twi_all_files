@@ -82,7 +82,7 @@ def compute_flow_accumulation_pysheds(dem, scale=90):
 
     # 5) Flow direction and accumulation (default D8)
     fdir_mfd = grid.flowdir(inflated, routing='mfd')
-    acc_mfd = grid.accumulation(fdir, routing='mfd')
+    acc_mfd = grid.accumulation(fdir_mfd, routing='mfd')
 
     # # 6) Convert back to ee.Image
     # transform_tuple = (
