@@ -36,7 +36,7 @@ def compute_flow_accumulation_pysheds(dem_img, scale=90):
 
     # 2) Export DEM from GEE to GeoTIFF
     geemap.ee_export_image(
-      dem,
+      dem_img,
       filename=dem_path,
       scale=scale,
       file_per_band=False
