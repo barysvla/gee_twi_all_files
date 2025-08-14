@@ -1,5 +1,6 @@
 import ee
 import geemap
+import numpy as np
 
 def compute_slope(dem, region, scale=90):
     """
@@ -46,8 +47,9 @@ def compute_slope(dem, region, scale=90):
 #     with rasterio.open(slope_path) as src:
 #         slope_np = src.read(1).astype(np.float32)
 
-    # sanitize to finite values
-    slope_np = np.where(np.isfinite(slope_np), slope_np, np.nan).astype(np.float32)
-    return slope_np
+    # # sanitize to finite values
+    # slope_np = np.where(np.isfinite(slope_np), slope_np, np.nan).astype(np.float32)
+    # return slope_np
+
 
 
