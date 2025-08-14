@@ -42,22 +42,9 @@ def compute_flow_accumulation_pysheds(dem, scale=90):
       file_per_band=False
     )
 
-    # # 3) Load into PySheds grid
-    # grid = Grid.from_raster(dem_path)
-    # dem_np = grid.read_raster(dem_path).astype(np.float32)
-
-    # # Nodata value
-    # with rasterio.open(dem_path) as src:
-    #     transform = src.transform
-    #     crs = str(src.crs)
-    #     nodata_val = src.nodata if src.nodata is not None else -9999.0
-
-    # # Replace NaN with nodata
-    # dem_np = np.nan_to_num(dem_np, nan=nodata_val)
-
      # 3) Load into PySheds grid
     grid = Grid.from_raster(dem_path)
-    dem_np = grid.read_raster(dem_path).astype(np.float32)
+    dem_np = grid.read_raster(dem_path).astype(np.float64)
 
     # Nodata value
     with rasterio.open(dem_path) as src:
@@ -67,19 +54,15 @@ def compute_flow_accumulation_pysheds(dem, scale=90):
 
     # Replace NaN with nodata
     dem_np = np.nan_to_num(dem_np, nan=nodata_val)
-    
-    # # 4) Hydrological conditioning
-    # flooded = grid.fill_depressions(dem_np)
-    # inflated = grid.resolve_flats(flooded)
-
-    # # 5) Flow direction and accumulation (default D8)
-    # fdir = grid.flowdir(inflated)
-    # acc = grid.accumulation(fdir)
 
     # 4) Hydrological conditioning
     flooded = grid.fill_depressions(dem_np)
     inflated = grid.resolve_flats(flooded)
 
+     # # 5) Flow direction and accumulation (default D8)
+    # fdir = grid.flowdir(inflated)
+    # acc = grid.accumulation(fdir)
+    
     # 5) Flow direction and accumulation (default D8)
     fdir_mfd = grid.flowdir(inflated, routing='mfd')
     acc_mfd = grid.accumulation(fdir_mfd, routing='mfd')
