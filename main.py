@@ -28,7 +28,7 @@ dem = dataset_MERIT.select("elv").clip(geometry).reproject('EPSG:4326', None, 90
 acc_np, transform, crs = compute_flow_accumulation_pysheds(dem, scale=90)
 
 # 2) Slope v GEE → export → NumPy (ve stupních)
-slope = compute_slope(dem, geometry, scale=90)
+slope_np = compute_slope(dem, geometry, scale=90)
 
 # 3) TWI v NumPy → GeoTIFF → (volitelně) zpět do GEE jako ee.Image
 twi_scaled = compute_twi_numpy(acc_np, slope_np, acc_is_area=True)
@@ -117,6 +117,7 @@ plt.show()
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
 
 
