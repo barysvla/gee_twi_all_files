@@ -8,7 +8,6 @@
 #     tan_slope = safe_slope.divide(180).multiply(ee.Number(3.14159265359)).tan()
 #     twi = flow_accumulation.divide(tan_slope).log().rename("TWI")
 #     scaled_twi = twi.multiply(1e8).toInt().rename("TWI_scaled")
-    
 
 #     return scaled_twi
 
@@ -52,3 +51,4 @@ def compute_twi_numpy(
     twi_scaled = (twi * 1e8).astype(np.int32)
     return  twi_scaled
   
+
