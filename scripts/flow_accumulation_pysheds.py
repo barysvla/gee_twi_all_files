@@ -6,7 +6,7 @@ import rasterio
 import tempfile
 import os
 
-def compute_flow_accumulation_pysheds(dem_img, scale=90):
+def compute_flow_accumulation_pysheds(dem, scale=90):
     """
     Compute flow accumulation from an ee.Image DEM using PySheds.
 
@@ -36,7 +36,7 @@ def compute_flow_accumulation_pysheds(dem_img, scale=90):
 
     # 2) Export DEM from GEE to GeoTIFF
     geemap.ee_export_image(
-      dem_img,
+      dem,
       filename=dem_path,
       scale=scale,
       file_per_band=False
