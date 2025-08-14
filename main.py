@@ -1,5 +1,6 @@
 import ee
 import geemap
+import numpy as np
 
 # Import vlastních modulů
 from scripts.flow_accumulation_hydro import compute_flow_accumulation_hydro
@@ -33,21 +34,6 @@ slope_np = compute_slope(dem, geometry, scale=90)
 # 3) TWI v NumPy → GeoTIFF → (volitelně) zpět do GEE jako ee.Image
 twi_scaled = compute_twi_numpy(acc_np, slope_np, acc_is_area=True)
 
-import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap, Normalize, LogNorm
-
-palette = ["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
-cmap = ListedColormap(palette)
-
-norm = LogNorm()
-
-plt.figure(figsize=(10, 8))
-im = plt.imshow(twi_scaled, cmap=cmap, norm=norm)
-plt.colorbar(im, fraction=0.036, pad=0.04, label="TWI log scaled")
-plt.title("TWI (log scaled) – NumPy vizualizace")
-plt.axis("off")
-plt.show()
-
 # # Výpočet jednotlivých vrstev
 flow_accumulation_hydro = compute_flow_accumulation_hydro(dem)
 # flow_accumulation_pysheds = compute_flow_accumulation_pysheds(dem)
@@ -57,13 +43,6 @@ twi_hydro = compute_twi(flow_accumulation_hydro, slope)
 
 twi_hydro = geemap.ee_to_numpy(twi_hydro, region=geometry, bands=['TWI_scaled'], scale=90)
 twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
-
-plt.figure(figsize=(10, 8))
-im = plt.imshow(twi_hydro, cmap=cmap, norm=norm)
-plt.colorbar(im, fraction=0.036, pad=0.04, label="TWI hydro log scaled")
-plt.title("TWI hydro (log scaled) – NumPy vizualizace")
-plt.axis("off")
-plt.show()
 
 # Kombinace vrstev
 #out = dem.addBands(twi) #.addBands(flow_accumulation).addBands(slope)
@@ -117,11 +96,3 @@ plt.show()
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
-
-
-
-
-
-
-
-
