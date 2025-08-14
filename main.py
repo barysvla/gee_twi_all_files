@@ -7,8 +7,9 @@ from scripts.flow_accumulation_hydro import compute_flow_accumulation_hydro
 from scripts.flow_accumulation_pysheds import compute_flow_accumulation_pysheds
 from scripts.slope import compute_slope
 from scripts.slope_ee_image import compute_slope_ee_image
-from scripts.twi_np import compute_twi_numpy
 from scripts.twi import compute_twi
+from scripts.twi_np import compute_twi_numpy
+from scripts.twi_np import compute_twi_numpy_like_ee
 from scripts.visualization import visualize_map
 #from scripts.export import export_to_drive, export_to_asset
 
@@ -32,7 +33,8 @@ acc_np, transform, crs = compute_flow_accumulation_pysheds(dem, scale=90)
 slope_np = compute_slope(dem, geometry, scale=90)
 
 # 3) TWI v NumPy → GeoTIFF → (volitelně) zpět do GEE jako ee.Image
-twi_scaled = compute_twi_numpy(acc_np, slope_np, acc_is_area=True)
+#twi_scaled = compute_twi_numpy(acc_np, slope_np, acc_is_area=True)
+twi_scaled = compute_twi_numpy_like_ee_area(acc_np, slope_np, scale_to_int=True)
 
 # # Výpočet jednotlivých vrstev
 flow_accumulation_hydro = compute_flow_accumulation_hydro(dem)
@@ -96,3 +98,4 @@ twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
