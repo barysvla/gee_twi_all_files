@@ -12,79 +12,43 @@
 
 #     return scaled_twi
 
-import ee
 import numpy as np
-import rasterio
-import tempfile
-import os
 
-def compute_twi(acc_np, slope_deg_np, transform, crs,
-                                 out_dir=None, out_name="twi_scaled.tif",
-                                 scale_to_int=True, nodata_int=-2147483648):
+def compute_twi_numpy(
+    acc_np: np.ndarray,
+    slope_deg_np: np.ndarray,
+    *,
+    acc_is_area: bool,           # True pokud acc_np je už plocha (m²); False pokud je to počet buněk
+    cell_area: float | None = None,  # plocha jedné buňky v m² (nutné, pokud acc_is_area=False)
+    min_slope_deg: float = 0.1,  # ochrana proti tan(0)
+    scale_to_int: bool = True
+):
     """
-    Compute TWI in NumPy: TWI = ln( a / tan(beta) )
-    - acc_np: D8 upstream cell counts (float32)
-    - slope_deg_np: slope in degrees (float32), from GEE
-    - transform: rasterio Affine taken from DEM
-    - crs: rasterio CRS taken from DEM
-    Writes GeoTIFF and returns (out_path, ee_image) where ee_image is created via ee.Image.loadGeoTIFF.
+    TWI = ln( a / tan(beta) )
+    a ........ upslope area [m²]
+    beta ..... sklon v radiánech (z degrees)
     """
+    # Sanitize vstupy
+    acc = np.array(acc_np, dtype=np.float32)
+    slope_deg = np.array(slope_deg_np, dtype=np.float32)
 
-    # Ensure finite arrays
-    acc = np.where(np.isfinite(acc_np), acc_np, 0.0).astype(np.float32)
-    slope_deg = np.where(np.isfinite(slope_deg_np), slope_deg_np, 0.0).astype(np.float32)
-
-    # Cell metrics
-    cellsize_x = float(transform.a)
-    cellsize_y = float(abs(transform.e))
-    cell_area = cellsize_x * cellsize_y
-
-    # Avoid zeros
-    acc_pos = np.maximum(acc, 1.0)
-    slope_rad = np.deg2rad(np.maximum(slope_deg, 0.1))  # clamp to avoid tan(0)
-    tan_beta = np.tan(slope_rad)
-
-    # TWI
-    twi = np.log((acc_pos * cell_area) / tan_beta).astype(np.float32)
-
-    # Optional scaling to int (compat with your previous pipeline)
-    if scale_to_int:
-        twi_out = (twi * 1e8).astype(np.int32)
-        dtype = "int32"
-        nodata = nodata_int
+    # a) plocha povodí a [m²]
+    if acc_is_area:
+        a = np.where(np.isfinite(acc), acc, 0.0)
     else:
-        twi_out = twi
-        dtype = "float32"
-        nodata = np.nan
+        if cell_area is None:
+            raise ValueError("cell_area musí být zadána, pokud acc_np není plocha (m²).")
+        a = np.where(np.isfinite(acc), acc * float(cell_area), 0.0)
 
-    # Output path
-    if out_dir is None:
-        out_dir = tempfile.mkdtemp()
-    out_path = os.path.join(out_dir, out_name)
+    # b) tan(beta), beta z degrees + ochranný práh
+    slope_deg_safe = np.maximum(slope_deg, float(min_slope_deg))
+    tan_beta = np.tan(np.deg2rad(slope_deg_safe))
+    tan_beta = np.where(np.isfinite(tan_beta) & (tan_beta > 0), tan_beta, 1e-3)
 
-    # Write GeoTIFF
-    profile = {
-        "driver": "GTiff",
-        "height": twi_out.shape[0],
-        "width": twi_out.shape[1],
-        "count": 1,
-        "dtype": dtype,
-        "crs": crs,
-        "transform": transform,
-        "tiled": True,
-        "blockxsize": 512,
-        "blockysize": 512,
-        "compress": "DEFLATE",
-    }
-    if dtype == "int32":
-        profile["nodata"] = nodata
+    # c) TWI
+    a_safe = np.where(np.isfinite(a) & (a > 0), a, 1.0)
+    twi = np.log(a_safe / tan_beta).astype(np.float32)
 
-    with rasterio.open(out_path, "w", **profile) as dst:
-        dst.write(twi_out, 1)
-
-    # Optional: load back to EE directly from local path? (Not supported)
-    # Proper way in notebook for quick use: upload to GCS (US) and ee.Image.loadGeoTIFF('gs://...').
-    # For convenience, return None as ee_image here; caller can load from GCS when uploaded.
-    ee_image = None
-
-    return out_path, ee_image
+    twi_scaled = (twi * 1e8).astype(np.int32)
+    return  twi_scaled
+  
