@@ -22,24 +22,41 @@ center = geometry.centroid().coordinates().getInfo()
 dataset_MERIT = ee.Image("MERIT/Hydro/v1_0_1")
 dem = dataset_MERIT.select("elv").clip(geometry)
 
-# Výpočet jednotlivých vrstev
-flow_accumulation_hydro = compute_flow_accumulation_hydro(dem)
-flow_accumulation_pysheds = compute_flow_accumulation_pysheds(dem)
-slope = compute_slope(dem)
-twi_hydro = compute_twi(flow_accumulation_hydro, slope)
-twi_pysheds = compute_twi(flow_accumulation_pysheds, slope)
+# # Výpočet jednotlivých vrstev
+# flow_accumulation_hydro = compute_flow_accumulation_hydro(dem)
+# flow_accumulation_pysheds = compute_flow_accumulation_pysheds(dem)
+# slope = compute_slope(dem)
+# twi_hydro = compute_twi(flow_accumulation_hydro, slope)
+# twi_pysheds = compute_twi(flow_accumulation_pysheds, slope)
+
+# 1) Flow accumulation v NumPy (PySheds)
+acc_np, transform, crs = compute_flow_accumulation_pysheds(dem, scale=90)
+
+# 2) Slope v GEE → export → NumPy (ve stupních)
+slope_deg_np = compute_slope(dem, geometry=geometry, scale=90)
+
+# 3) TWI v NumPy → GeoTIFF → (volitelně) zpět do GEE jako ee.Image
+twi_tif_path, twi_img = compute_twi_numpy_to_geotiff(
+    acc_np=acc_np,
+    slope_deg_np=slope_deg_np,
+    transform=transform,
+    crs=crs,
+    out_dir=None,            # None => tempdir
+    out_name="twi_scaled.tif",
+    scale_to_int=True,       # shoda s tvým pipeline (x1e8, int32)
+)
 
 # Kombinace vrstev
 #out = dem.addBands(twi) #.addBands(flow_accumulation).addBands(slope)
 
-# Vizualizace
-vis_params_twi = {
-    "bands": ["TWI_scaled"],
-    "min": -529168144.8390943,
-    "max": 2694030.111316502,
-    "opacity": 1,
-    "palette": ["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
-}
+# # Vizualizace
+# vis_params_twi = {
+#     "bands": ["TWI_scaled"],
+#     "min": -529168144.8390943,
+#     "max": 2694030.111316502,
+#     "opacity": 1,
+#     "palette": ["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
+# }
 #vis_params_slope = {
 #    "bands": ["Slope"],
 #    "min": 0,
@@ -53,15 +70,15 @@ vis_params_twi = {
 #    "palette": ["black", "white"]
 #}
 
-# Vytvoření mapy
-Map = visualize_map([
-    (twi_hydro, vis_params_twi, "TWI_merit_hydro"),
-    (twi_pysheds, vis_params_twi, "TWI_pysheds")#,
-   # (out.select("Slope"), vis_params_slope, "Slope"),
-   # (out.select("elv"), vis_params_dem, "Elevation")
-])
+## Vytvoření mapy
+# Map = visualize_map([
+#     (twi_hydro, vis_params_twi, "TWI_merit_hydro"),
+#     (twi_pysheds, vis_params_twi, "TWI_pysheds")#,
+#    # (out.select("Slope"), vis_params_slope, "Slope"),
+#    # (out.select("elv"), vis_params_dem, "Elevation")
+# ])
 
-Map.setCenter(center[0], center[1], zoom=12)
+# Map.setCenter(center[0], center[1], zoom=12)
 
 # Ověření, zda mapa obsahuje vrstvy
 #for layer in Map.layers:
@@ -81,6 +98,7 @@ Map.setCenter(center[0], center[1], zoom=12)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
 
 
