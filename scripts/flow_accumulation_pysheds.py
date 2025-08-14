@@ -96,4 +96,4 @@ def compute_flow_accumulation_pysheds(dem, scale=90):
     #     crs=crs
     # )
 
-    return acc_mfd
+    return acc_mfd, transform, crs
