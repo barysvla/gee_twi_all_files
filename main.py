@@ -20,20 +20,13 @@ center = geometry.centroid().coordinates().getInfo()
 
 # Načtení DEM
 dataset_MERIT = ee.Image("MERIT/Hydro/v1_0_1")
-dem = dataset_MERIT.select("elv").clip(geometry)
-
-# # Výpočet jednotlivých vrstev
-# flow_accumulation_hydro = compute_flow_accumulation_hydro(dem)
-# flow_accumulation_pysheds = compute_flow_accumulation_pysheds(dem)
-# slope = compute_slope(dem)
-# twi_hydro = compute_twi(flow_accumulation_hydro, slope)
-# twi_pysheds = compute_twi(flow_accumulation_pysheds, slope)
+dem = dataset_MERIT.select("elv").clip(geometry).reproject('EPSG:4326', None, 90)
 
 # 1) Flow accumulation v NumPy (PySheds)
 acc_np, transform, crs = compute_flow_accumulation_pysheds(dem, scale=90)
 
 # 2) Slope v GEE → export → NumPy (ve stupních)
-slope_deg_np = compute_slope(dem, geometry=geometry, scale=90)
+slope_deg_np = compute_slope(dem, geometry, scale=90)
 
 # 3) TWI v NumPy → GeoTIFF → (volitelně) zpět do GEE jako ee.Image
 twi_tif_path, twi_img = compute_twi_numpy_to_geotiff(
@@ -45,6 +38,13 @@ twi_tif_path, twi_img = compute_twi_numpy_to_geotiff(
     out_name="twi_scaled.tif",
     scale_to_int=True,       # shoda s tvým pipeline (x1e8, int32)
 )
+
+# # Výpočet jednotlivých vrstev
+# flow_accumulation_hydro = compute_flow_accumulation_hydro(dem)
+# flow_accumulation_pysheds = compute_flow_accumulation_pysheds(dem)
+# slope = compute_slope(dem)
+# twi_hydro = compute_twi(flow_accumulation_hydro, slope)
+# twi_pysheds = compute_twi(flow_accumulation_pysheds, slope)
 
 # Kombinace vrstev
 #out = dem.addBands(twi) #.addBands(flow_accumulation).addBands(slope)
@@ -98,6 +98,7 @@ twi_tif_path, twi_img = compute_twi_numpy_to_geotiff(
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
 
 
