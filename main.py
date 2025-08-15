@@ -24,7 +24,7 @@ center = geometry.centroid().coordinates().getInfo()
 
 # Načtení DEM
 dataset_MERIT = ee.Image("MERIT/Hydro/v1_0_1")
-dem = dataset_MERIT.select("elv").clip(geometry).reproject('EPSG:4326', None, 90)
+dem = dataset_MERIT.select("elv").clip(geometry).reproject('EPSG:4326', None, 90) # 32633
 
 # 1) Flow accumulation v NumPy (PySheds)
 acc_np, transform, crs = compute_flow_accumulation_pysheds(dem, scale=90, routing='mfd', area_units='km2')
@@ -38,10 +38,8 @@ twi_scaled = compute_twi_numpy_like_ee(acc_np, slope_np, scale_to_int=True)
 
 # # Výpočet jednotlivých vrstev
 flow_accumulation_hydro = compute_flow_accumulation_hydro(dem)
-# flow_accumulation_pysheds = compute_flow_accumulation_pysheds(dem)
 slope = compute_slope_ee_image(dem)
 twi_hydro = compute_twi(flow_accumulation_hydro, slope)
-# twi_pysheds = compute_twi(flow_accumulation_pysheds, slope)
 
 twi_hydro = geemap.ee_to_numpy(twi_hydro, region=geometry, bands=['TWI_scaled'], scale=90)
 twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
@@ -98,6 +96,7 @@ twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
 
 
