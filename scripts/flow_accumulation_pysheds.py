@@ -61,7 +61,8 @@ def compute_flow_accumulation_pysheds(
     dem_np = np.nan_to_num(dem_np, nan=nodata_val).astype(np.float32)
 
     # 4) Hydrological conditioning
-    flooded = grid.fill_depressions(dem_np)
+    pit_filled = grid.fill_pits(dem_np)
+    flooded = grid.fill_depressions(pit_filled)
     inflated = grid.resolve_flats(flooded)
 
     # 5) Flow direction & accumulation (PySheds output = number/fraction of cells)
