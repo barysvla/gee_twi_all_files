@@ -34,7 +34,7 @@ slope_np = compute_slope(dem, geometry, scale=90)
 
 # 3) TWI v NumPy → GeoTIFF → (volitelně) zpět do GEE jako ee.Image
 #twi_scaled = compute_twi_numpy(acc_np, slope_np, acc_is_area=True)
-twi_scaled = compute_twi_numpy_like_ee_area(acc_np, slope_np, scale_to_int=True)
+twi_scaled = compute_twi_numpy_like_ee(acc_np, slope_np, scale_to_int=True)
 
 # # Výpočet jednotlivých vrstev
 flow_accumulation_hydro = compute_flow_accumulation_hydro(dem)
@@ -98,5 +98,6 @@ twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
 
