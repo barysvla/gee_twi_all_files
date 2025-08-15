@@ -27,7 +27,7 @@ dataset_MERIT = ee.Image("MERIT/Hydro/v1_0_1")
 dem = dataset_MERIT.select("elv").clip(geometry).reproject('EPSG:4326', None, 90)
 
 # 1) Flow accumulation v NumPy (PySheds)
-acc_np, transform, crs = compute_flow_accumulation_pysheds(dem, scale=90)
+acc_np, transform, crs = compute_flow_accumulation_pysheds(dem, scale=90, routing='mfd', area_units='km2')
 
 # 2) Slope v GEE → export → NumPy (ve stupních)
 slope_np = compute_slope(dem, geometry, scale=90)
@@ -98,4 +98,5 @@ twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
