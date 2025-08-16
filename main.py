@@ -20,19 +20,24 @@ ee.Initialize(project = 'gee-project-twi')
 geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
 
 # Získání středu polygonu a nastavení zoomu
-center = geometry.centroid().coordinates().getInfo()
+#center = geometry.centroid().coordinates().getInfo()
 
 # Načtení DEM
-dataset_MERIT = ee.Image("MERIT/Hydro/v1_0_1")
-dem = dataset_MERIT.select("elv").clip(geometry).reproject('EPSG:4326', None, 92.77) # 32633
+dataset = ee.Image("MERIT/Hydro/v1_0_1")
+dem = dataset.select("elv").clip(geometry)
+
+proj = dem.projection()
+scale_m = proj.nominalScale().getInfo()
+
+dem_fix = dem.reproject(crs="EPSG:32633", scale=scale_m)
 
 # 1) Flow accumulation v NumPy (PySheds)
-acc_np, transform, crs = compute_flow_accumulation_pysheds(dem, scale=90, routing='mfd', area_units='cells')
+acc_np, transform, crs = compute_flow_accumulation_pysheds(dem_fix, scale=scale_m, routing='mfd', area_units='km2')
 
 # 2) Slope v GEE → export → NumPy (ve stupních)
-slope_np = compute_slope(dem, geometry, scale=90)
+slope_np = compute_slope(dem_fix, geometry, scale=scale_m)
 
-# 3) TWI v NumPy → GeoTIFF → (volitelně) zpět do GEE jako ee.Image
+# 3) TWI v NumPy → GeoTIFF
 #twi_scaled = compute_twi_numpy(acc_np, slope_np, acc_is_area=True)
 twi_scaled = compute_twi_numpy_like_ee(acc_np, slope_np, scale_to_int=True)
 
@@ -96,6 +101,7 @@ twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
 
 
