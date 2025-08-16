@@ -81,11 +81,11 @@ twi_scaled = compute_twi_numpy_like_ee(
 #twi_scaled = compute_twi_numpy_like_ee(acc_np, slope_np, scale_to_int=True)
 
 # # Výpočet jednotlivých vrstev
-flow_accumulation_hydro = compute_flow_accumulation_hydro(dem)
-slope = compute_slope_ee_image(dem)
+flow_accumulation_hydro = compute_flow_accumulation_hydro(dem_fix)
+slope = compute_slope_ee_image(dem_fix)
 twi_hydro = compute_twi(flow_accumulation_hydro, slope)
 
-twi_hydro = geemap.ee_to_numpy(twi_hydro, region=geometry, bands=['TWI_scaled'], scale=90)
+twi_hydro = geemap.ee_to_numpy(twi_hydro, region=geometry, bands=['TWI_scaled'], scale=scale_m)
 twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
 
 # Kombinace vrstev
@@ -140,6 +140,7 @@ twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
 
 
