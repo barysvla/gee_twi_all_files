@@ -77,8 +77,8 @@ def compute_flow_accumulation_pysheds(
 
         # --- 4) DEM conditioning (fill pits, depressions, resolve flats) ---
         # See PySheds docs for recommended sequence.
-        pit_filled = grid.fill_pits(dem_np)
-        flooded = grid.fill_depressions(pit_filled)
+        # pit_filled = grid.fill_pits(dem_np)
+        flooded = grid.fill_depressions(dem_np)
         inflated = grid.resolve_flats(flooded)
 
         # --- 5) Flow direction ---
