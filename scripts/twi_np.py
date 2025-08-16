@@ -55,7 +55,7 @@ def compute_twi_numpy(
 import numpy as np
 
 def compute_twi_numpy_like_ee(
-    acc_area_m2_np: np.ndarray,   # upstream area A [m^2]
+    acc_area_np: np.ndarray,   # upstream area A [m^2]
     slope_deg_np: np.ndarray,     # slope in degrees (same grid)
     *,
     cellsize_m: float,            # grid cell length c [m] (e.g., abs(transform.a))
@@ -70,7 +70,7 @@ def compute_twi_numpy_like_ee(
     If scale_to_int=True, return int32 with EE-like scaling (×1e8) and nodata sentinel.
     """
     # -- 0) Inputs and basic checks
-    A = np.asarray(acc_area_m2_np, dtype=np.float64)
+    A = np.asarray(acc_area_np, dtype=np.float64)
     slope_deg = np.asarray(slope_deg_np, dtype=np.float64)
     if A.shape != slope_deg.shape:
         raise ValueError(f"Shape mismatch: acc {A.shape} vs slope {slope_deg.shape}")
@@ -141,6 +141,7 @@ def compute_twi_numpy_like_ee(
 #     valid = np.isfinite(twi)
 #     twi_scaled[valid] = (twi[valid] * 1e8).astype(np.int32)
 #     return twi_scaled
+
 
 
 
