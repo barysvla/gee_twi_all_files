@@ -30,7 +30,7 @@ def compute_slope(dem_img, region, *, crs=None, crs_transform=None, scale=None):
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-V2
+# V2
 # import ee
 # import geemap
 # import numpy as np
@@ -84,6 +84,7 @@ V2
     # # sanitize to finite values
     # slope_np = np.where(np.isfinite(slope_np), slope_np, np.nan).astype(np.float32)
     # return slope_np
+
 
 
 
