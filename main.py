@@ -38,12 +38,12 @@ crs_transform = proj_info['transform']       # [a, b, c, d, e, f] affine
 region = geometry.bounds(1)                  # jistý obdélník
 
 # 1) Flow accumulation v NumPy (PySheds)
-acc_m2, transform, out_crs = compute_flow_accumulation_pysheds(
+accumulation, transform, out_crs = compute_flow_accumulation_pysheds(
     dem_fix, 
     # scale nepoužijeme, když předáváme crs_transform
     scale=scale_m, 
     routing='mfd', 
-    area_units='m2',          # <<< ZÁSADNÍ: m², ne km²
+    area_units='km2',
     crs=crs, 
     crs_transform=crs_transform, 
     region=region
@@ -67,7 +67,7 @@ else:
 
 # 3) TWI in NumPy (uses specific catchment area a = A / c)
 twi_scaled = compute_twi_numpy_like_ee(
-    acc_area_m2_np=acc_m2,
+    acc_area_np=accumulation,
     slope_deg_np=slope_np,
     cellsize_m=cellsize_m,        # <-- pass cell length in meters
     scale_to_int=True
@@ -140,6 +140,7 @@ twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
 
 
