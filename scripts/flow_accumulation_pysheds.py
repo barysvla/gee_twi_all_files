@@ -11,8 +11,8 @@ def compute_flow_accumulation_pysheds(
     routing: str = 'mfd',
     area_units: str = 'm2',            # default m² kvůli TWI
     crs: str | None = None,
-    crs_transform: list | None = None, # <<< přidáno
-    region: ee.Geometry | None = None, # <<< přidáno
+    crs_transform: list | None = None, # 
+    region: ee.Geometry | None = None, #
     nodata_val: float = -9999.0
 ):
     routing = routing.lower()
