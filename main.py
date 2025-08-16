@@ -43,7 +43,7 @@ accumulation, transform, out_crs = compute_flow_accumulation_pysheds(
     # scale nepoužijeme, když předáváme crs_transform
     scale=scale_m, 
     routing='mfd', 
-    area_units='km2',
+    area_units='cells',
     crs=crs, 
     crs_transform=crs_transform, 
     region=region
@@ -140,6 +140,7 @@ twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
 
 
