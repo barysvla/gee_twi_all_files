@@ -55,59 +55,56 @@ def compute_twi_numpy(
 import numpy as np
 
 def compute_twi_numpy_like_ee(
-    acc_area_m2_np: np.ndarray,   # upstream total contributing area A [m^2]
-    slope_deg_np: np.ndarray,     # slope in degrees on the SAME grid as A
+    acc_area_m2_np: np.ndarray,   # upstream area A [m^2]
+    slope_deg_np: np.ndarray,     # slope in degrees (same grid)
     *,
     cellsize_m: float,            # grid cell length c [m] (e.g., abs(transform.a))
     scale_to_int: bool = True,
     nodata_int: int = -2147483648
 ) -> np.ndarray:
     """
-    Compute TWI in an Earth Engine-like fashion (optionally scaled to int32).
-
-    Definition:
-      TWI = ln( (A / c) / tan(beta) )
-
-      A .... upstream contributing area [m^2] (e.g., from weighted accumulation of pixelArea)
-      c .... grid cell length [m] (for square pixels: abs(transform.a))
-      beta . slope in degrees (0° is clamped to 0.1° to avoid tan(0))
-
-    Output:
-      If scale_to_int=True -> int32 array where valid cells are round(TWI * 1e8),
-      invalid cells are set to nodata_int.
-      If scale_to_int=False -> float32 TWI values.
+    TWI = ln( (A / c) / tan(beta) ), where:
+      A .... contributing area [m^2]
+      c .... cell length [m]
+      beta . slope in degrees (0° clamped to 0.1°)
+    If scale_to_int=True, return int32 with EE-like scaling (×1e8) and nodata sentinel.
     """
-    # Ensure arrays and check shape consistency
+    # -- 0) Inputs and basic checks
     A = np.asarray(acc_area_m2_np, dtype=np.float64)
     slope_deg = np.asarray(slope_deg_np, dtype=np.float64)
     if A.shape != slope_deg.shape:
         raise ValueError(f"Shape mismatch: acc {A.shape} vs slope {slope_deg.shape}")
-
-    # Validate cell size
     if not np.isfinite(cellsize_m) or cellsize_m <= 0:
         raise ValueError("cellsize_m must be a positive finite value in meters.")
 
-    # 1) Specific catchment area a = A / c [m^2/m]
+    # -- 1) Specific catchment area a = A / c  [m^2/m]
     sca = A / float(cellsize_m)
 
-    # 2) Safe slope: clamp 0° to 0.1° to avoid tan(0)
+    # -- 2) Safe slope: prevent tan(0)
     safe_slope = np.where(slope_deg == 0.0, 0.1, slope_deg)
-
-    # 3) Compute tan(beta) and then TWI; mark invalid as NaN
     tan_beta = np.tan(np.deg2rad(safe_slope))
+
+    # -- 3) TWI; keep invalid cells as NaN
     with np.errstate(divide='ignore', invalid='ignore'):
         ratio = sca / tan_beta
-        valid = (sca > 0) & np.isfinite(ratio) & (ratio > 0)
+        valid_ratio = np.isfinite(ratio) & (ratio > 0) & np.isfinite(sca) & (sca > 0)
         twi = np.full(A.shape, np.nan, dtype=np.float32)
-        twi[valid] = np.log(ratio[valid]).astype(np.float32)
+        twi[valid_ratio] = np.log(ratio[valid_ratio]).astype(np.float32)
 
     if not scale_to_int:
-        return twi  # float32 result
+        return twi  # float32 result (NaN where invalid)
 
-    # 4) Scale to int32 like EE (×1e8) with a NoData sentinel
+    # -- 4) Robust scaling to int32
+    scaled = twi * 1e8  # float32
+    # Only keep values that are finite and inside int32 range when scaled
+    INT32_MIN, INT32_MAX = np.int32(-2147483648), np.int32(2147483647)
+    finite_mask = np.isfinite(scaled)
+    range_mask = (scaled >= INT32_MIN) & (scaled <= INT32_MAX)
+    vmask = finite_mask & range_mask
+
     out = np.full(A.shape, nodata_int, dtype=np.int32)
-    vmask = np.isfinite(twi)
-    out[vmask] = (twi[vmask] * 1e8).astype(np.int32)
+    # Use rounding before cast; mask guarantees no NaN/Inf, prevents cast warning
+    out[vmask] = np.rint(scaled[vmask]).astype(np.int32)
     return out
 
 # import numpy as np
@@ -144,6 +141,7 @@ def compute_twi_numpy_like_ee(
 #     valid = np.isfinite(twi)
 #     twi_scaled[valid] = (twi[valid] * 1e8).astype(np.int32)
 #     return twi_scaled
+
 
 
 
