@@ -31,15 +31,41 @@ scale_m = proj.nominalScale().getInfo()
 
 dem_fix = dem.reproject(crs="EPSG:32633", scale=scale_m)
 
+# >>> ZÍSKÁNÍ GRIDU PRO EXPORT <<<
+proj_info = dem_fix.projection().getInfo()
+crs = proj_info['crs']                       # např. 'EPSG:32633'
+crs_transform = proj_info['transform']       # [a, b, c, d, e, f] affine
+region = geometry.bounds(1)                  # jistý obdélník
+
 # 1) Flow accumulation v NumPy (PySheds)
-acc_np, transform, crs = compute_flow_accumulation_pysheds(dem_fix, scale=scale_m, routing='mfd', area_units='km2')
+acc_m2, transform, out_crs = compute_flow_accumulation_pysheds(
+    dem_fix, 
+    # scale nepoužijeme, když předáváme crs_transform
+    scale=scale_m, 
+    routing='mfd', 
+    area_units='m2',          # <<< ZÁSADNÍ: m², ne km²
+    crs=crs, 
+    crs_transform=crs_transform, 
+    region=region
+)
+
+# 2) Slope v GEE → export → NumPy
+slope_np = compute_slope(
+    dem_fix, 
+    region=region, 
+    crs=crs, 
+    crs_transform=crs_transform
+)
+
+# 3) TWI v NumPy → GeoTIFF
+#twi_scaled = compute_twi_numpy_like_ee(acc_m2, slope_np, scale_to_int=True)
 
 # 2) Slope v GEE → export → NumPy (ve stupních)
-slope_np = compute_slope(dem_fix, geometry, scale=scale_m)
+#slope_np = compute_slope(dem_fix, geometry, scale=scale_m)
 
 # 3) TWI v NumPy → GeoTIFF
 #twi_scaled = compute_twi_numpy(acc_np, slope_np, acc_is_area=True)
-twi_scaled = compute_twi_numpy_like_ee(acc_np, slope_np, scale_to_int=True)
+#twi_scaled = compute_twi_numpy_like_ee(acc_np, slope_np, scale_to_int=True)
 
 # # Výpočet jednotlivých vrstev
 flow_accumulation_hydro = compute_flow_accumulation_hydro(dem)
@@ -101,6 +127,7 @@ twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
 
 
