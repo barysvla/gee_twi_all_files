@@ -57,8 +57,21 @@ slope_np = compute_slope(
     crs_transform=crs_transform
 )
 
-# 3) TWI v NumPy → GeoTIFF
-#twi_scaled = compute_twi_numpy_like_ee(acc_m2, slope_np, scale_to_int=True)
+# Derive cell size [m] from the exported affine transform ---
+# For non-rotated rasters (typical), pixel width is |a|.
+# If the raster is rotated (b or d != 0), use hypot(a, b) to get the pixel size along x.
+if abs(transform.b) > 1e-9 or abs(transform.d) > 1e-9:
+    cellsize_m = float((transform.a**2 + transform.b**2) ** 0.5)  # robust for rotation
+else:
+    cellsize_m = float(abs(transform.a))  # standard case: square, non-rotated pixels
+
+# 3) TWI in NumPy (uses specific catchment area a = A / c)
+twi_scaled = compute_twi_numpy_like_ee(
+    acc_area_m2_np=acc_m2,
+    slope_deg_np=slope_np,
+    cellsize_m=cellsize_m,        # <-- pass cell length in meters
+    scale_to_int=True
+)
 
 # 2) Slope v GEE → export → NumPy (ve stupních)
 #slope_np = compute_slope(dem_fix, geometry, scale=scale_m)
@@ -127,6 +140,7 @@ twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
 
 
