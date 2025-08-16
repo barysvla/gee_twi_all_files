@@ -24,7 +24,7 @@ center = geometry.centroid().coordinates().getInfo()
 
 # Načtení DEM
 dataset_MERIT = ee.Image("MERIT/Hydro/v1_0_1")
-dem = dataset_MERIT.select("elv").clip(geometry).reproject('EPSG:4326', None, 90) # 32633
+dem = dataset_MERIT.select("elv").clip(geometry).reproject('EPSG:4326', None, 92.77) # 32633
 
 # 1) Flow accumulation v NumPy (PySheds)
 acc_np, transform, crs = compute_flow_accumulation_pysheds(dem, scale=90, routing='mfd', area_units='cells')
@@ -96,6 +96,7 @@ twi_hydro = np.squeeze(twi_hydro).astype(np.float64)
 
 # task_drive.start()
 # print("📤 Export do Google Drive zahájen! Sledujte průběh v GEE Tasks.")
+
 
 
 
