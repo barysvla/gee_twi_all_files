@@ -48,25 +48,33 @@
 import numpy as np
 from collections import deque
 
-def compute_flow_accumulation_quinn_cit(flow_quinn_cit, pixel_area_m2, nodata_mask=None,
-                                        normalize_weights=True, out='km2'):
+def compute_flow_accumulation_quinn_cit(flow_quinn_cit,
+                                        pixel_area_m2=None,
+                                        nodata_mask=None,
+                                        normalize_weights=True,
+                                        out='km2'):
     """
-    Flow accumulation (Quinn 1995, CIT weights) with variable pixel area.
-    
-    Parameters:
-        flow_quinn_cit : (H, W, 8) float32  -- flow fractions to 8 neighbors (sum<=1 per cell)
-        pixel_area_m2  : (H, W) float32     -- per-pixel area in square meters (aligned grid)
-        nodata_mask    : (H, W) bool or None -- True where cell is invalid (NoData)
-        normalize_weights : bool             -- if True, renormalize positive weights to sum to 1
-        out            : 'm2' or 'km2'       -- output units
-    
-    Returns:
-        accumulation : (H, W) float32 in requested units
-    """
-    H, W, _ = flow_quinn_cit.shape
-    assert pixel_area_m2.shape == (H, W)
+    Flow accumulation (Quinn 1995, CIT weights).
 
-    # Prepare masks
+    Parameters:
+        flow_quinn_cit : (H, W, 8) float32
+            Flow fractions to 8 neighbors in D8 order (sum<=1 per cell).
+        pixel_area_m2  : (H, W) float32 or float or None
+            Per-pixel area in m^2 (array or scalar). Required for 'm2'/'km2'.
+            Ignored for 'cells'.
+        nodata_mask    : (H, W) bool or None
+            True where cell is invalid (NoData). If None, assumed all valid.
+        normalize_weights : bool
+            If True, renormalize positive weights per-cell to sum to 1.
+        out            : {'cells','m2','km2'}
+            Output units.
+
+    Returns:
+        (H, W) float32 accumulation in requested units.
+    """
+    H, W, K = flow_quinn_cit.shape
+    assert K == 8, "Expected 8 neighbor weights (D8)."
+
     if nodata_mask is None:
         nodata_mask = np.zeros((H, W), dtype=bool)
 
@@ -74,27 +82,41 @@ def compute_flow_accumulation_quinn_cit(flow_quinn_cit, pixel_area_m2, nodata_ma
     Wgt = flow_quinn_cit.astype(np.float32).copy()
     Wgt[nodata_mask, :] = 0.0
 
-    # Optional normalization: for each valid cell, scale positive weights to sum to 1
+    # Optional per-cell normalization of outgoing weights
     if normalize_weights:
         sums = Wgt.sum(axis=2, dtype=np.float32)
         pos = (sums > 0) & (~nodata_mask)
+        # Avoid division by zero via masking
         Wgt[pos, :] /= sums[pos, None]
 
     # D8 neighbor offsets in the same order as weights
-    D8 = np.array([(-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0)], dtype=np.int8)
+    D8 = np.array([(-1, 1), (0, 1), (1, 1), (1, 0),
+                   (1, -1), (0, -1), (-1, -1), (-1, 0)], dtype=np.int8)
 
-    # Initialize accumulation with pixel area (each cell contributes its own area)
-    acc = pixel_area_m2.astype(np.float64)  # use float64 for stability; cast back later
+    # Initialize accumulation with unit mass per cell ('cells')
+    # or with pixel area in m^2 ('m2'/'km2')
+    if out == 'cells':
+        acc = np.ones((H, W), dtype=np.float64)
+    elif out in ('m2', 'km2'):
+        if pixel_area_m2 is None:
+            raise ValueError("pixel_area_m2 is required for out='m2' or 'km2'.")
+        if np.isscalar(pixel_area_m2):
+            acc = (np.ones((H, W), dtype=np.float64) * float(pixel_area_m2))
+        else:
+            assert pixel_area_m2.shape == (H, W), "pixel_area_m2 must match grid shape"
+            acc = pixel_area_m2.astype(np.float64)
+    else:
+        raise ValueError("out must be one of {'cells','m2','km2'}")
+
+    # Invalidate NoData cells
     acc[nodata_mask] = 0.0
 
-    # Compute in-degree (number of upstream dependencies) per cell
+    # Compute in-degree (number of upstream contributors) per cell
     indeg = np.zeros((H, W), dtype=np.int32)
-
     for i in range(H):
         for j in range(W):
             if nodata_mask[i, j]:
                 continue
-            # outgoing edges from (i,j)
             for k, (di, dj) in enumerate(D8):
                 if Wgt[i, j, k] <= 0:
                     continue
@@ -102,15 +124,13 @@ def compute_flow_accumulation_quinn_cit(flow_quinn_cit, pixel_area_m2, nodata_ma
                 if 0 <= ni < H and 0 <= nj < W and not nodata_mask[ni, nj]:
                     indeg[ni, nj] += 1
 
-    # Topological processing queue: start with cells that have no incoming contributors
-    q = deque([(i, j) for i in range(H) for j in range(W) if (indeg[i, j] == 0 and not nodata_mask[i, j])])
+    # Kahn-like topological processing
+    q = deque([(i, j) for i in range(H) for j in range(W)
+               if (indeg[i, j] == 0 and not nodata_mask[i, j])])
 
     while q:
         i, j = q.popleft()
         a_ij = acc[i, j]
-        if a_ij == 0.0:
-            # still need to decrement indegrees downstream
-            pass
         for k, (di, dj) in enumerate(D8):
             w = Wgt[i, j, k]
             if w <= 0:
@@ -122,12 +142,8 @@ def compute_flow_accumulation_quinn_cit(flow_quinn_cit, pixel_area_m2, nodata_ma
                 if indeg[ni, nj] == 0:
                     q.append((ni, nj))
 
-    # Units
+    # Unit conversion
     if out == 'km2':
-        acc = acc / 1e6
-    elif out == 'm2':
-        pass
-    else:
-        raise ValueError("out must be 'm2' or 'km2'")
+        acc = acc / 1e6  # m^2 -> km^2
 
     return acc.astype(np.float32)
