@@ -316,7 +316,7 @@ def resolve_flats_barnes(
     }
     return dem_out, FlatMask.astype(np.int32), labels, stats
 
-
+# -------------------------------------------------------------------
 # TIE MODIFIKACE- dava zmenenych 10 k ale...
 # import numpy as np
 # from collections import deque
