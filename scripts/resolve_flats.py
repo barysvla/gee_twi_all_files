@@ -185,7 +185,7 @@ def resolve_flats_barnes_fast(
         has_equal8[i0:i1, j0:j1] |= v & (np.abs(diff) <= equal_tol)
         has_lower8[i0:i1, j0:j1] |= v & (diff < -equal_tol)
 
-    flats = valid & has_equal8 & (~has_lower8)
+    flats = valid & (~has_lower8)
 
     # --- 2) labelování flats (8-conn + tolerance) ---
     labels = np.zeros_like(valid, np.int32)
