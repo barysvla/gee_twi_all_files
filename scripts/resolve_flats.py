@@ -150,7 +150,7 @@ def resolve_flats_towards_lower_edge(
 import numpy as np
 from collections import deque
 
-def resolve_flats_barnes_fast(
+def resolve_flats_barnes(
     dem,
     nodata=np.nan,
     epsilon=1e-5,
