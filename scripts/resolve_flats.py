@@ -145,3 +145,156 @@ def resolve_flats_towards_lower_edge(
         "treat_oob_as_lower": bool(treat_oob_as_lower),
     }
     return dem_out, flatmask, labels, stats
+
+# -------------------------------------------------------
+import numpy as np
+from collections import deque
+
+def resolve_flats_barnes_fast(
+    dem,
+    nodata=np.nan,
+    epsilon=1e-5,
+    equal_tol=1e-3,
+    treat_oob_as_lower=True,
+    require_low_edge_only=True
+):
+    Z = np.asarray(dem)
+    if Z.ndim != 2:
+        raise ValueError("DEM must be 2D")
+    nrows, ncols = Z.shape
+
+    valid = np.isfinite(Z) if np.isnan(nodata) else ((Z != nodata) & np.isfinite(Z))
+
+    OFFS8 = [(-1,-1), (-1,0), (-1,1),
+             ( 0,-1),         ( 0,1),
+             ( 1,-1), ( 1,0), ( 1,1)]
+    def inb(i,j): return 0 <= i < nrows and 0 <= j < ncols
+
+    # --- 1) kandidáti na flats (rovnost i nižší soused v 8-conn) ---
+    has_equal8 = np.zeros_like(valid, bool)
+    has_lower8 = np.zeros_like(valid, bool)
+    for di,dj in OFFS8:
+        i0, i1 = max(0,-di), min(nrows, nrows-di)
+        j0, j1 = max(0,-dj), min(ncols, ncols-dj)
+        if i0>=i1 or j0>=j1: 
+            continue
+        a = Z[i0:i1, j0:j1]
+        b = Z[i0+di:i1+di, j0+dj:j1+dj]
+        v = valid[i0:i1, j0:j1] & valid[i0+di:i1+di, j0+dj:j1+dj]
+        diff = b - a
+        has_equal8[i0:i1, j0:j1] |= v & (np.abs(diff) <= equal_tol)
+        has_lower8[i0:i1, j0:j1] |= v & (diff < -equal_tol)
+
+    flats = valid & has_equal8 & (~has_lower8)
+
+    # --- 2) labelování flats (8-conn + tolerance) ---
+    labels = np.zeros_like(valid, np.int32)
+    cur = 0
+    for i in range(nrows):
+        for j in range(ncols):
+            if flats[i,j] and labels[i,j]==0:
+                cur += 1
+                q = deque([(i,j)])
+                labels[i,j] = cur
+                z0 = Z[i,j]
+                while q:
+                    ci,cj = q.popleft()
+                    for di,dj in OFFS8:
+                        ni,nj = ci+di, cj+dj
+                        if inb(ni,nj) and flats[ni,nj] and labels[ni,nj]==0 and abs(Z[ni,nj]-z0) <= equal_tol:
+                            labels[ni,nj] = cur
+                            q.append((ni,nj))
+
+    if cur == 0:
+        dem_out = Z.astype(np.float32, copy=True)
+        dem_out[~valid] = (np.nan if np.isnan(nodata) else nodata)
+        stats = {"n_flats":0,"n_flat_cells":0,"n_changed_cells":0,"n_flats_drainable":0,"equal_tol":float(equal_tol)}
+        return dem_out, np.zeros_like(labels), labels, stats
+
+    # --- 3) hrany (8-conn) ---
+    HighEdges = [deque() for _ in range(cur+1)]
+    LowEdges  = [deque() for _ in range(cur+1)]
+    has_low   = np.zeros(cur+1, bool)
+    has_high  = np.zeros(cur+1, bool)
+
+    for i in range(nrows):
+        for j in range(ncols):
+            lbl = labels[i,j]
+            if lbl==0: continue
+            z0 = Z[i,j]
+            adj_higher = False
+            adj_lower  = False
+            for di,dj in OFFS8:
+                ni,nj = i+di, j+dj
+                if not inb(ni,nj) or not valid[ni,nj]:
+                    if treat_oob_as_lower:
+                        adj_lower = True
+                    continue
+                if labels[ni,nj] != lbl:
+                    dz = Z[ni,nj] - z0
+                    if dz >  equal_tol: adj_higher = True
+                    if dz < -equal_tol: adj_lower  = True
+            if adj_lower:  LowEdges[lbl].append((i,j)); has_low[lbl]=True
+            if adj_higher: HighEdges[lbl].append((i,j)); has_high[lbl]=True
+
+    def flat_active(lbl):
+        if not has_low[lbl]: return False
+        return True if require_low_edge_only else has_high[lbl]
+
+    # --- 4) dvě BFS (mark-on-enqueue) ---
+    away     = np.full(labels.shape, -1, np.int32)
+    towards  = np.full(labels.shape, -1, np.int32)
+    FlatMask = np.zeros_like(labels, np.int32)
+    FlatH    = np.zeros(cur+1, np.int32)
+
+    # A) od vyššího
+    for lbl in range(1, cur+1):
+        if not flat_active(lbl): continue
+        q = HighEdges[lbl]
+        if not q: continue
+        for si,sj in q: away[si,sj] = 1
+        while q:
+            ci,cj = q.popleft()
+            cl = away[ci,cj]
+            if cl > FlatH[lbl]: FlatH[lbl] = cl
+            for di,dj in OFFS8:
+                ni,nj = ci+di, cj+dj
+                if inb(ni,nj) and labels[ni,nj]==lbl and away[ni,nj]==-1:
+                    away[ni,nj] = cl + 1
+                    q.append((ni,nj))
+
+    # B) k nižšímu (dominantní 2*dist) + kombinace
+    drainable = 0
+    for lbl in range(1, cur+1):
+        if not flat_active(lbl): continue
+        q = LowEdges[lbl]
+        if not q: continue
+        drainable += 1
+        for si,sj in q: towards[si,sj] = 1
+        while q:
+            ci,cj = q.popleft()
+            cl = towards[ci,cj]
+            if away[ci,cj] != -1:
+                FlatMask[ci,cj] = (FlatH[lbl] - away[ci,cj]) + 2*cl
+            else:
+                FlatMask[ci,cj] = 2*cl
+            for di,dj in OFFS8:
+                ni,nj = ci+di, cj+dj
+                if inb(ni,nj) and labels[ni,nj]==lbl and towards[ni,nj]==-1:
+                    towards[ni,nj] = cl + 1
+                    q.append((ni,nj))
+
+    # --- 5) aplikace ---
+    dem_out = Z.astype(np.float32, copy=True)
+    inc = (labels>0) & valid
+    dem_out[inc] = dem_out[inc] + epsilon * FlatMask[inc]
+
+    dem_out[~valid] = (np.nan if np.isnan(nodata) else nodata)
+    stats = {
+        "n_flats": int(cur),
+        "n_flats_drainable": int(drainable),
+        "n_flat_cells": int(np.count_nonzero(labels)),
+        "n_changed_cells": int(np.count_nonzero((FlatMask!=0) & inc)),
+        "equal_tol": float(equal_tol)
+    }
+    return dem_out, FlatMask.astype(np.int32), labels, stats
