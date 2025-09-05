@@ -1,7 +1,6 @@
 import numpy as np
 from collections import deque
 
-# najde 4500 bunek, ale acc nefunguje
 import numpy as np
 from collections import deque
 
@@ -9,7 +8,7 @@ def resolve_flats_towards_lower_edge(
     dem,
     nodata=np.nan,
     *,
-    epsilon=1e-5,             # velikost kroků (neovlivní počet změn, jen Δ)
+    epsilon=2e-5,             # velikost kroků (neovlivní počet změn, jen Δ)
     equal_tol=1e-3,           # tolerance pro "rovnost" (spojování plošin / ties)
     lower_tol=0.0,            # tolerance pro "přísně nižší"
     equality_connectivity=8,  # 4 nebo 8 pro spojování plošin; PySheds je blíž 8
@@ -419,7 +418,7 @@ from collections import deque
 def resolve_flats_barnes(
     dem,
     nodata=np.nan,
-    epsilon=1e-5,
+    epsilon=2e-5,
     equal_tol=1e-3,           # tolerance pro rovnost (spojování plošin)
     lower_tol=0.0,            # tolerance pro "nižší" (doporuč. 0..1e-6)
     treat_oob_as_lower=True,
