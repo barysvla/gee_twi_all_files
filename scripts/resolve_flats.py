@@ -2,23 +2,42 @@ import numpy as np
 from collections import deque
 
 # najde 4500 bunek, ale acc nefunguje
+import numpy as np
+from collections import deque
+
 def resolve_flats_towards_lower_edge(
     dem,
     nodata=np.nan,
-    epsilon=1e-5,             # řádově jako pysheds
-    equal_tol=1e-3,           # pro rovnost (labeling)
-    lower_tol=0.0,            # pro "nižší" souseda (detekce odtoku)
-    equality_connectivity=8,  # 4/8 pro spojování plošin
-    treat_oob_as_lower=True,  # OOB/NoData jako "lower"
-    force_all_flats=False,    # změnit i plošiny bez skutečného lower edge (perimetr)
-    bump_frontier=True        # změnit i frontier (dist==0) -> jako u tvojeho Barnes
+    *,
+    epsilon=1e-5,             # velikost kroků (neovlivní počet změn, jen Δ)
+    equal_tol=1e-3,           # tolerance pro "rovnost" (spojování plošin / ties)
+    lower_tol=0.0,            # tolerance pro "přísně nižší"
+    equality_connectivity=8,  # 4 nebo 8 pro spojování plošin; PySheds je blíž 8
+    treat_oob_as_lower=True,  # hrana rastru jako nižší terén (běžná praxe)
+    cascade_equal_to_lower=True,  # "rovný soused" mimo plošinu, který SÁM má nižšího -> považuj za lower-edge
+    force_all_flats=False,    # když plošina nemá lower-edge, použij perimetr (ne zcela hydrologické)
+    bump_frontier=True        # posuň i frontier (dist==0), zvýší počet změn jako u PySheds
 ):
+    """
+    Garbrecht–Martz styl: vynucení minimálního sklonu TOWARDS nižšímu okraji
+    + "kaskádové" výtoky přes rovné sousedy (ties). Vše plně na numpy, BFS.
+
+    Návrat:
+      dem_out  : float32 DEM po úpravě (NoData zachováno)
+      flatmask : int32   vzdálenost od použité frontier uvnitř plošiny (0..)
+      labels   : int32   ID plošin (0 = mimo plochu)
+      stats    : dict    počty a parametry běhu
+    """
     Z = np.asarray(dem)
     if Z.ndim != 2:
         raise ValueError("DEM must be 2D")
     nrows, ncols = Z.shape
 
-    valid = np.isfinite(Z) if np.isnan(nodata) else ((Z != nodata) & np.isfinite(Z))
+    # valid mask
+    if np.isnan(nodata):
+        valid = np.isfinite(Z)
+    else:
+        valid = (Z != nodata) & np.isfinite(Z)
 
     OFFS8 = [(-1,-1), (-1,0), (-1,1),
              ( 0,-1),         ( 0,1),
@@ -26,59 +45,65 @@ def resolve_flats_towards_lower_edge(
     OFFS4 = [(-1,0), (1,0), (0,-1), (0,1)]
     OFFS_EQ = OFFS4 if equality_connectivity == 4 else OFFS8
 
-    def inb(i,j): return 0 <= i < nrows and 0 <= j < ncols
+    def inb(i,j): return (0 <= i < nrows) and (0 <= j < ncols)
 
-    # --- 1) "má nižšího souseda?" (8-conn, s lower_tol)
+    # ---- 1) Kdo má přísně nižšího souseda? (8-conn, lower_tol) ----
     has_lower = np.zeros_like(valid, bool)
-    for di,dj in OFFS8:
-        i0, i1 = max(0,-di), min(nrows, nrows-di)
-        j0, j1 = max(0,-dj), min(ncols, ncols-dj)
-        if i0>=i1 or j0>=j1: 
+    for di, dj in OFFS8:
+        i0, i1 = max(0, -di), min(nrows, nrows - di)
+        j0, j1 = max(0, -dj), min(ncols, ncols - dj)
+        if i0 >= i1 or j0 >= j1:
             continue
         a = Z[i0:i1, j0:j1]
         b = Z[i0+di:i1+di, j0+dj:j1+dj]
         v = valid[i0:i1, j0:j1] & valid[i0+di:i1+di, j0+dj:j1+dj]
         has_lower[i0:i1, j0:j1] |= v & ((b - a) < -lower_tol)
 
-    # Flats: NEMÁ nižšího souseda
+    # Plošiny = valid & NEMÁ nižšího souseda (rovnost se zde nevyžaduje)
     flats_mask = valid & (~has_lower)
 
-    # --- 2) Labeling plošin (± equal_tol, 4/8-conn)
-    labels = np.full(Z.shape, -1, np.int32)
+    # ---- 2) Labeling plošin (rovnost v toleranci, 4/8-conn) ----
+    labels = np.zeros_like(valid, np.int32)
     cur = 0
     for i in range(nrows):
         for j in range(ncols):
-            if flats_mask[i,j] and labels[i,j] == -1:
-                z0 = Z[i,j]
-                q = deque([(i,j)])
-                labels[i,j] = cur
-                while q:
-                    ci,cj = q.popleft()
-                    for di,dj in OFFS_EQ:
-                        ni,nj = ci+di, cj+dj
-                        if (inb(ni,nj) and flats_mask[ni,nj]
-                            and labels[ni,nj]==-1
-                            and abs(Z[ni,nj]-z0) <= equal_tol):
-                            labels[ni,nj] = cur
-                            q.append((ni,nj))
+            if flats_mask[i, j] and labels[i, j] == 0:
                 cur += 1
+                z0 = Z[i, j]
+                q = deque([(i, j)])
+                labels[i, j] = cur
+                while q:
+                    ci, cj = q.popleft()
+                    for di, dj in OFFS_EQ:
+                        ni, nj = ci + di, cj + dj
+                        if inb(ni, nj) and flats_mask[ni, nj] and labels[ni, nj] == 0:
+                            if abs(Z[ni, nj] - z0) <= equal_tol:
+                                labels[ni, nj] = cur
+                                q.append((ni, nj))
 
-    # --- BFS vzdálenost od fronty (8-conn)
+    if cur == 0:
+        out = Z.astype(np.float32, copy=True)
+        out[~valid] = (np.nan if np.isnan(nodata) else nodata)
+        stats = {"n_flats": 0, "n_flat_cells": 0, "n_changed_cells": 0}
+        return out, np.zeros_like(labels), labels, stats
+
+    # ---- 3) Pro každou plošinu určete frontier: skutečný lower-edge + "kaskáda" ----
     def bfs_distance(region_mask, frontier_mask):
+        """8-conn BFS vzdálenost od frontier; -1 = nedosaženo."""
         dist = np.full(region_mask.shape, -1, np.int32)
         q = deque()
         fi, fj = np.where(frontier_mask & region_mask)
-        for a,b in zip(fi,fj):
-            dist[a,b] = 0
-            q.append((a,b))
+        for a, b in zip(fi, fj):
+            dist[a, b] = 0
+            q.append((a, b))
         while q:
-            ci,cj = q.popleft()
-            d0 = dist[ci,cj]
-            for di,dj in OFFS8:
-                ni,nj = ci+di, cj+dj
-                if inb(ni,nj) and region_mask[ni,nj] and dist[ni,nj] == -1:
-                    dist[ni,nj] = d0 + 1
-                    q.append((ni,nj))
+            ci, cj = q.popleft()
+            d0 = dist[ci, cj]
+            for di, dj in OFFS8:
+                ni, nj = ci + di, cj + dj
+                if inb(ni, nj) and region_mask[ni, nj] and dist[ni, nj] == -1:
+                    dist[ni, nj] = d0 + 1
+                    q.append((ni, nj))
         return dist
 
     dem_out = Z.astype(np.float32, copy=True)
@@ -87,29 +112,37 @@ def resolve_flats_towards_lower_edge(
     n_drainable = 0
     n_forced = 0
 
-    # --- 3) Vynutit sklon na všech plošinách (Barnes-like chování)
-    for lbl in range(cur):
+    for lbl in range(1, cur + 1):
         region = (labels == lbl)
         if not np.any(region):
             continue
         flat_z = Z[region][0]
 
-        # a) "nižší okraj" + kaskáda: rovný soused mimo plošinu, který SÁM má nižšího souseda
+        # a) skutečný lower-edge + "cascaded ties"
         lower_edge = np.zeros_like(region, bool)
         ri, rj = np.where(region)
-        for ci,cj in zip(ri, rj):
-            for di,dj in OFFS8:
-                ni,nj = ci+di, cj+dj
-                if not inb(ni,nj) or not valid[ni,nj]:
+        for ci, cj in zip(ri, rj):
+            for di, dj in OFFS8:
+                ni, nj = ci + di, cj + dj
+                if not inb(ni, nj) or not valid[ni, nj]:
                     if treat_oob_as_lower:
-                        lower_edge[ci,cj] = True
+                        lower_edge[ci, cj] = True
                     continue
-                if not region[ni,nj]:
-                    dz = Z[ni,nj] - flat_z
+                if not region[ni, nj]:
+                    dz = Z[ni, nj] - flat_z
                     if dz < -lower_tol:
-                        lower_edge[ci,cj] = True
-                    elif abs(dz) <= equal_tol and has_lower[ni,nj]:
-                        lower_edge[ci,cj] = True  # "kaskádový" outlet
+                        lower_edge[ci, cj] = True
+                    elif cascade_equal_to_lower and abs(dz) <= equal_tol:
+                        # soused mimo plošinu je "rovný"; ověř kaskádově, že on sám má nižšího
+                        got_lower = False
+                        for ddi, ddj in OFFS8:
+                            mi, mj = ni + ddi, nj + ddj
+                            if inb(mi, mj) and valid[mi, mj]:
+                                if Z[mi, mj] < Z[ni, nj] - lower_tol:
+                                    got_lower = True
+                                    break
+                        if got_lower:
+                            lower_edge[ci, cj] = True
 
         use_fallback = False
         if np.any(lower_edge):
@@ -120,38 +153,254 @@ def resolve_flats_towards_lower_edge(
                 continue
             # fallback: perimetr plošiny
             perim = np.zeros_like(region, bool)
-            for ci,cj in zip(ri, rj):
-                for di,dj in OFFS8:
-                    ni,nj = ci+di, cj+dj
-                    if not inb(ni,nj) or not region[ni,nj]:
-                        perim[ci,cj] = True
+            for ci, cj in zip(ri, rj):
+                for di, dj in OFFS8:
+                    ni, nj = ci + di, cj + dj
+                    if not inb(ni, nj) or not region[ni, nj]:
+                        perim[ci, cj] = True
                         break
             frontier = perim
             use_fallback = True
             n_forced += 1
 
-        dist_down = bfs_distance(region, frontier)
+        # b) BFS vzdálenost dovnitř plošiny
+        dist = bfs_distance(region, frontier)
 
-        sel = region & (dist_down >= 0)
+        sel = region & (dist >= 0)
         if not np.any(sel):
             continue
 
-        # --- zásah: bumpnout i frontier pro stejné chování jako u Barnes
-        eff_dist = dist_down[sel] + (1 if bump_frontier else 0)
-        flatmask[sel] = dist_down[sel]
-        delta = (epsilon * eff_dist).astype(np.float32)
-        dem_out[sel] = dem_out[sel] + delta
-        n_changed += int(sel.sum()) if bump_frontier else int(np.count_nonzero(dist_down[sel] > 0))
+        flatmask[sel] = dist[sel]
+
+        if bump_frontier:
+            eff = dist[sel] + 1  # frontier (0) dostane krok 1
+            dem_out[sel] = dem_out[sel] + (epsilon * eff).astype(np.float32)
+            n_changed += int(sel.sum())
+        else:
+            core = sel & (dist > 0)
+            dem_out[core] = dem_out[core] + (epsilon * dist[core]).astype(np.float32)
+            n_changed += int(np.count_nonzero(core))
 
     # NoData zpět
-    dem_out[~valid] = (np.nan if np.isnan(nodata) else nodata)
+    if np.isnan(nodata):
+        dem_out[~valid] = np.nan
+    else:
+        dem_out[~valid] = nodata
 
     stats = {
         "n_flats": int(cur),
-        "n_flat_cells": int(np.count_nonzero(labels >= 0)),
-        "n_changed_cells": int(n_changed),
+        "n_flat_cells": int(np.count_nonzero(labels)),
         "n_flats_drainable": int(n_drainable),
         "n_flats_forced": int(n_forced),
+        "n_changed_cells": int(n_changed),
+        "equal_tol": float(equal_tol),
+        "lower_tol": float(lower_tol),
+        "equality_connectivity": int(equality_connectivity),
+        "treat_oob_as_lower": bool(treat_oob_as_lower),
+        "cascade_equal_to_lower": bool(cascade_equal_to_lower),
+        "force_all_flats": bool(force_all_flats),
+        "bump_frontier": bool(bump_frontier),
+        "epsilon": float(epsilon),
+    }
+    return dem_out, flatmask.astype(np.int32), labels, stats
+
+#----------------------------------------------------
+
+import numpy as np
+from collections import deque
+
+def resolve_flats_towards_lower_edge_gm(
+    dem,
+    nodata=np.nan,
+    epsilon=1e-5,
+    equal_tol=1e-3,           # rovnost pro labelování plošin
+    lower_tol=0.0,            # prah pro "přísně nižšího" souseda
+    equality_connectivity=4,  # 4 je bližší literatuře; 8 lze povolit
+    treat_oob_as_lower=True,  # na ořezu často pomůže True
+    force_all_flats=False,    # řešit i bez skutečného výtoku (fallback = perimetr)
+    bump_frontier=False,      # zvýšit i frontier (dist_low==0)
+    cascade_equal_to_lower=True  # „tie“: rovný soused sám má nižšího -> brát jako lower-edge
+):
+    Z = np.asarray(dem)
+    if Z.ndim != 2:
+        raise ValueError("DEM must be 2D")
+    nrows, ncols = Z.shape
+
+    valid = np.isfinite(Z) if np.isnan(nodata) else ((Z != nodata) & np.isfinite(Z))
+
+    OFFS8 = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]
+    OFFS4 = [(-1,0),(1,0),(0,-1),(0,1)]
+    OFFS_EQ = OFFS4 if equality_connectivity==4 else OFFS8
+
+    def inb(i,j): return 0 <= i < nrows and 0 <= j < ncols
+
+    # --- 1) má buňka přísně nižšího souseda? (8-conn, s lower_tol)
+    has_lower = np.zeros_like(valid, bool)
+    for di,dj in OFFS8:
+        i0,i1 = max(0,-di), min(nrows, nrows-di)
+        j0,j1 = max(0,-dj), min(ncols, ncols-dj)
+        if i0>=i1 or j0>=j1: 
+            continue
+        a = Z[i0:i1, j0:j1]
+        b = Z[i0+di:i1+di, j0+dj:j1+dj]
+        v = valid[i0:i1, j0:j1] & valid[i0+di:i1+di, j0+dj:j1+dj]
+        has_lower[i0:i1, j0:j1] |= v & ((b - a) < -lower_tol)
+
+    # plošiny = buňky bez přísně nižšího souseda
+    flats_mask = valid & (~has_lower)
+
+    # --- 2) labelování plošin (rovnost ±equal_tol; 4/8-conn pro rovnost)
+    labels = np.full(Z.shape, 0, np.int32)
+    cur = 0
+    for i in range(nrows):
+        for j in range(ncols):
+            if flats_mask[i,j] and labels[i,j]==0:
+                cur += 1
+                z0 = Z[i,j]
+                q = deque([(i,j)])
+                labels[i,j] = cur
+                while q:
+                    ci,cj = q.popleft()
+                    for di,dj in OFFS_EQ:
+                        ni,nj = ci+di, cj+dj
+                        if (inb(ni,nj) and flats_mask[ni,nj] and labels[ni,nj]==0
+                            and abs(Z[ni,nj]-z0) <= equal_tol):
+                            labels[ni,nj] = cur
+                            q.append((ni,nj))
+
+    if cur == 0:
+        out = Z.astype(np.float32, copy=True)
+        out[~valid] = (np.nan if np.isnan(nodata) else nodata)
+        return out, np.zeros_like(Z, np.int32), labels, {
+            "n_flats":0,"n_flat_cells":0,"n_changed_cells":0,"n_drainable":0
+        }
+
+    # --- 3) vybuduj low-edge & high-edge pro každou plošinu
+    LowEdge  = [deque() for _ in range(cur+1)]
+    HighEdge = [deque() for _ in range(cur+1)]
+    has_low  = np.zeros(cur+1, bool)
+
+    for i in range(nrows):
+        for j in range(ncols):
+            lbl = labels[i,j]
+            if lbl==0: continue
+            z0 = Z[i,j]
+            adj_low   = False
+            adj_high  = False
+            is_oob = False
+            for di,dj in OFFS8:
+                ni,nj = i+di, j+dj
+                if not inb(ni,nj) or not valid[ni,nj]:
+                    is_oob = True
+                    if treat_oob_as_lower:
+                        adj_low = True
+                    continue
+                if labels[ni,nj] != lbl:
+                    dz = Z[ni,nj] - z0
+                    if dz < -lower_tol:
+                        adj_low = True
+                    elif abs(dz) <= equal_tol and cascade_equal_to_lower and has_lower[ni,nj]:
+                        adj_low = True
+                    elif dz >  equal_tol:
+                        adj_high = True
+            if adj_low:
+                LowEdge[lbl].append((i,j)); has_low[lbl] = True
+            if adj_high:
+                HighEdge[lbl].append((i,j))
+
+    # --- 4) dvě BFS uvnitř plošiny: D_high (od vyššího), D_low (k nižšímu)
+    D_high = np.full(Z.shape, -1, np.int32)
+    D_low  = np.full(Z.shape, -1, np.int32)
+
+    # od vyššího
+    for lbl in range(1, cur+1):
+        if len(HighEdge[lbl])==0: 
+            continue
+        q = deque(HighEdge[lbl])
+        for si,sj in q:
+            D_high[si,sj] = 1  # mark-on-enqueue
+        while q:
+            ci,cj = q.popleft()
+            d = D_high[ci,cj]
+            for di,dj in OFFS8:
+                ni,nj = ci+di, cj+dj
+                if inb(ni,nj) and labels[ni,nj]==lbl and D_high[ni,nj]==-1:
+                    D_high[ni,nj] = d + 1
+                    q.append((ni,nj))
+
+    # k nižšímu
+    drainable = 0
+    for lbl in range(1, cur+1):
+        region_has_low = has_low[lbl]
+        if not region_has_low and not force_all_flats:
+            continue
+        # seedy
+        seeds = LowEdge[lbl]
+        if (not region_has_low) and force_all_flats:
+            # fallback: perimetr plošiny
+            seeds = deque()
+            ii,jj = np.where(labels==lbl)
+            region = (labels==lbl)
+            for ci,cj in zip(ii,jj):
+                for di,dj in OFFS8:
+                    ni,nj = ci+di, cj+dj
+                    if not inb(ni,nj) or not region[ni,nj]:
+                        seeds.append((ci,cj)); break
+        else:
+            drainable += 1
+
+        if len(seeds)==0:
+            continue
+
+        q = deque(seeds)
+        for si,sj in q:
+            D_low[si,sj] = 0  # frontier distance = 0
+        while q:
+            ci,cj = q.popleft()
+            d = D_low[ci,cj]
+            for di,dj in OFFS8:
+                ni,nj = ci+di, cj+dj
+                if inb(ni,nj) and labels[ni,nj]==lbl and D_low[ni,nj]==-1:
+                    D_low[ni,nj] = d + 1
+                    q.append((ni,nj))
+
+    # --- 5) kombinace (Garbrecht & Martz): G = 2*D_low + (H - D_high)
+    FlatMask = np.zeros_like(Z, np.int32)
+    for lbl in range(1, cur+1):
+        region = (labels==lbl)
+        if not np.any(region): 
+            continue
+        # H = max po plošině (jen kde D_high>=0)
+        H = 0
+        if np.any((D_high>=0) & region):
+            H = int(D_high[(D_high>=0) & region].max())
+        # frontier bump?
+        inc_low = D_low.copy()
+        if bump_frontier:
+            inc_low[(D_low==0) & region] = 1
+        # kombinace
+        g = np.zeros_like(FlatMask)
+        # jen buňky plošiny, kam se dostal D_low (tj. region vyřešený)
+        sel = region & (D_low>=0)
+        if np.any(sel):
+            g[sel] = 2*inc_low[sel]
+            # kde máme i D_high, přičti (H - D_high)
+            both = sel & (D_high>=0)
+            if np.any(both):
+                g[both] += (H - D_high[both])
+            FlatMask[sel] = g[sel]
+
+    # --- 6) aplikace Δ jen uvnitř plošin
+    out = Z.astype(np.float32, copy=True)
+    inc = (labels>0) & valid & (FlatMask!=0)
+    out[inc] = out[inc] + (epsilon * FlatMask[inc]).astype(np.float32)
+    out[~valid] = (np.nan if np.isnan(nodata) else nodata)
+
+    stats = {
+        "n_flats": int(cur),
+        "n_flat_cells": int(np.count_nonzero(labels)),
+        "n_changed_cells": int(np.count_nonzero(inc)),
+        "n_flats_drainable": int(drainable),
         "equal_tol": float(equal_tol),
         "lower_tol": float(lower_tol),
         "equality_connectivity": int(equality_connectivity),
@@ -160,7 +409,7 @@ def resolve_flats_towards_lower_edge(
         "bump_frontier": bool(bump_frontier),
         "epsilon": float(epsilon),
     }
-    return dem_out, flatmask, labels, stats
+    return out, FlatMask.astype(np.int32), labels, stats
 
 # -------------------------------------------------------
 import numpy as np
