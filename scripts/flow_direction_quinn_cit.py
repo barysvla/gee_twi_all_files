@@ -55,8 +55,8 @@ def compute_flow_direction_quinn_cit(dem, scale=1.0, cit=1000.0, h=2.0):
                         flow[i, j, k] = powered[idx] / total
 
     return flow
-    
-# Varainta 2 ------------------------------------------------------------------------------
+
+# Varianta 2 ------------------------------------------------------------------------
 import numpy as np
 
 # ----------------------------- #
