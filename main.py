@@ -35,7 +35,7 @@ px_r         = grid["pixel_area_m2"]
 transform    = grid["transform"]
 nodata_mask  = grid["nodata_mask"]
 
-# hydro conditioning
+# Hydro conditioning
 dem_filled, depth = priority_flood_fill(dem_r, nodata=np.nan, seed_internal_nodata_as_outlet=True, return_fill_depth=True)
 dem_out, flatmask, labels, stats = resolve_flats_barnes(
     dem_filled, nodata=np.nan, epsilon=2e-5, equal_tol=0.03, lower_tol=0.0,
