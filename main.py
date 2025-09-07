@@ -30,13 +30,13 @@ dem_raw = ee.Image('CGIAR/SRTM90_V4').select('elevation')
 # Right grid
 grid = prepare_aligned_dem_and_pixelarea(dem_raw, geometry)
 
-dem_r        = grid["dem"]
-px_r         = grid["pixel_area_m2"]
+dem          = grid["dem"]
+px_area      = grid["pixel_area_m2"]
 transform    = grid["transform"]
 nodata_mask  = grid["nodata_mask"]
 
 # Hydro conditioning
-dem_filled, depth = priority_flood_fill(dem_r, nodata=np.nan, seed_internal_nodata_as_outlet=True, return_fill_depth=True)
+dem_filled, depth = priority_flood_fill(dem, nodata=np.nan, seed_internal_nodata_as_outlet=True, return_fill_depth=True)
 dem_out, flatmask, labels, stats = resolve_flats_barnes(
     dem_filled, nodata=np.nan, epsilon=2e-5, equal_tol=0.03, lower_tol=0.0,
     treat_oob_as_lower=True, require_low_edge_only=True, force_all_flats=False
