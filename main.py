@@ -12,7 +12,7 @@ from scripts.fill_depressions import priority_flood_fill
 from scripts.resolve_flats import resolve_flats_barnes
 
 from scripts.flow_direction_quinn_cit import compute_flow_direction_quinn_cit
-from scripts.flow_direction_quinn1991 import compute_flow_direction_quinn1991
+from scripts.flow_direction_quinn_1991 import compute_flow_direction_quinn_1991
 from scripts.flow_direction_sfd_inf import compute_flow_direction_sfd_inf
 from scripts.flow_direction_dz_mfd import compute_flow_direction_mfd_dz
 
@@ -102,7 +102,7 @@ vis_params_twi = {
 
 # Create the map
 Map = visualize_map([
-    (twi, vis_params_twi, "TWI")  # ,
+    (twi, vis_params_twi, "TWI"),
     (ee_flow_accumulation, {}, "flow accumulation (km2)")
     # (out.select("Slope"), vis_params_slope, "Slope"),
     # (out.select("elv"), vis_params_dem, "Elevation")
