@@ -89,6 +89,7 @@ ee_flow_accumulation = dict_acc["image"]
 # Compute slope
 slope = compute_slope(dem_raw)
 
+# Compute TWI
 twi = compute_twi(ee_flow_accumulation, slope)
 
 # Visualization
