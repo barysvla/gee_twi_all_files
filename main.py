@@ -58,22 +58,22 @@ dem_out, flatmask, labels, stats = resolve_flats_barnes(
 )
 
 # Compute flow direction
-#flow_sfd = compute_flow_direction_sfd_inf(dem_out, transform, nodata_mask=nodata_mask)
+flow_sfd = compute_flow_direction_sfd_inf(dem_out, transform, nodata_mask=nodata_mask)
 
-flow_dz = compute_flow_direction_dz_mfd(dem_out, p=1.6, nodata_mask=nodata_mask)
+#flow_dz = compute_flow_direction_dz_mfd(dem_out, p=1.6, nodata_mask=nodata_mask)
 
 # Compute flow accumulation
-#acc_km2 = compute_flow_accumulation_sfd_inf(flow_dz, pixel_area_m2=px_area,
-#                                  nodata_mask=nodata_mask, out='km2')
+acc_km2 = compute_flow_accumulation_sfd_inf(flow_dz, pixel_area_m2=px_area,
+                                  nodata_mask=nodata_mask, out='km2')
 
 #acc_km2 = compute_flow_accumulation_quinn_cit(flow_dz, pixel_area_m2=px_area, nodata_mask=nodata_mask, out='km2')
 
 #acc_cells = compute_flow_accumulation_sfd_inf(flow_dz, nodata_mask=nodata_mask, out='cells')
-acc_cells = compute_flow_accumulation_quinn_cit(flow_dz, pixel_area_m2=None, nodata_mask=nodata_mask, out='cells')
+#acc_cells = compute_flow_accumulation_quinn_cit(flow_dz, pixel_area_m2=None, nodata_mask=nodata_mask, out='cells')
 
 # Push numpy array to ee.Image GeoTIFF
 dict_acc = push_array_to_ee_geotiff(
-    acc_cells,
+    acc_km2,
     transform=transform,
     crs=grid["crs"],
     nodata_mask=nodata_mask,
