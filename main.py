@@ -25,6 +25,8 @@ from scripts.slope import compute_slope
 
 from scripts.twi import compute_twi
 
+from scripts.visualization import visualize_map
+
 # !Inicializace GEE!
 ee.Initialize(project = 'gee-project-twi')
 
@@ -32,7 +34,7 @@ ee.Initialize(project = 'gee-project-twi')
 geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
 
 # Získání středu polygonu a nastavení zoomu
-#center = geometry.centroid().coordinates().getInfo()
+center = geometry.centroid().coordinates().getInfo()
 
 # Načtení DEM
 dem_raw = ee.Image('CGIAR/SRTM90_V4').select('elevation')
