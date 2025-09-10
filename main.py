@@ -37,9 +37,9 @@ geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
 center = geometry.centroid().coordinates().getInfo()
 
 # Načtení DEM
-# SRTM 30m
+# SRTM 90m
 #dem_raw = ee.Image('CGIAR/SRTM90_V4').select('elevation')
-# MERIT 90
+# MERIT 90m
 dem_raw = ee.Image("MERIT/Hydro/v1_0_1").select("elv")
 
 # Right grid
