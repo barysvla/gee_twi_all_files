@@ -12,8 +12,12 @@ from fill_depressions import priority_flood_fill
 from resolve_flats import resolve_flats_barnes
 
 from flow_direction_quinn_cit import compute_flow_direction_quinn_cit
+from flow_direction_quinn1991 import compute_flow_direction_quinn1991
+from flow_direction_sfd_inf import compute_flow_direction_sfd_inf
+from flow_direction_dz_mfd import compute_flow_direction_mfd_dz
 
 from flow_accumulation_quinn_cit import compute_flow_accumulation_quinn_cit
+from flow_accumulation_sfd_inf import compute_flow_accumulation_sfd_inf
 
 # !Inicializace GEE!
 ee.Initialize(project = 'gee-project-twi')
@@ -41,3 +45,12 @@ dem_out, flatmask, labels, stats = resolve_flats_barnes(
     dem_filled, nodata=np.nan, epsilon=2e-5, equal_tol=0.03, lower_tol=0.0,
     treat_oob_as_lower=True, require_low_edge_only=True, force_all_flats=False
 )
+
+# Compute flow direction
+flow_sfd = compute_flow_direction_sfd_inf(dem_out, transform, nodata_mask=nodata_mask)
+
+# Compute flow accumulation
+acc_km2 = compute_flow_accumulation_sfd_inf(flow_sfd, pixel_area_m2=px_area,
+                                  nodata_mask=nodata_mask, out='km2')
+
+# acc_cells = compute_flow_accumulation_sfd_inf(flow_sfd, nodata_mask=nodata_mask, out='cells')
