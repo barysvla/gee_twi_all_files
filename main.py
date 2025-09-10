@@ -26,6 +26,7 @@ from scripts.slope import compute_slope
 from scripts.twi import compute_twi
 
 from scripts.visualization import visualize_map
+from scripts.visualization import vis_2sigma
 
 # !Inicializace GEE!
 ee.Initialize(project = 'gee-project-twi')
@@ -37,10 +38,12 @@ geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
 center = geometry.centroid().coordinates().getInfo()
 
 # Načtení DEM
-# SRTM 90m
+# SRTM 30m
 #dem_raw = ee.Image('CGIAR/SRTM90_V4').select('elevation')
-# MERIT 90m
+# MERIT 90
 dem_raw = ee.Image("MERIT/Hydro/v1_0_1").select("elv")
+
+scale = dem_raw.projection().nominalScale().getInfo()
 
 # Right grid
 grid = prepare_aligned_dem_and_pixelarea(dem_raw, geometry)
@@ -92,14 +95,23 @@ slope = compute_slope(dem_raw)
 # Compute TWI
 twi = compute_twi(ee_flow_accumulation, slope)
 
+# CTI
+cti_ic = ee.ImageCollection("projects/sat-io/open-datasets/HYDROGRAPHY90/flow_index/cti")
+cti = cti_ic.mosaic().toFloat().clip(geometry)
+
 # Visualization
-vis_params_twi = {
-    "bands": ["TWI_scaled"],
-    "min": -529168144.8390943,
-    "max": 2694030.111316502,
-    "opacity": 1,
-    "palette": ["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
-}
+vis_twi = vis_2sigma(twi, "TWI_scaled", geometry, scale, k=2.0,
+                     palette=["#ff0000","#ffa500","#ffff00","#90ee90","#0000ff"])
+
+vis_cti = vis_2sigma(cti, "b1", geometry, scale, k=2.0,
+                     palette=["#ff0000","#ffa500","#ffff00","#90ee90","#0000ff"])
+# vis_params_twi = {
+#     "min": -529168144.8390943,
+#     "max": 2694030.111316502,
+#     "opacity": 1,
+#     "palette": ["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
+# }
+
 # vis_params_slope = {
 #     "bands": ["Slope"],
 #     "min": 0,
@@ -115,8 +127,10 @@ vis_params_twi = {
 
 # Create the map
 Map = visualize_map([
-    (twi, vis_params_twi, "TWI"),
-    (ee_flow_accumulation, {}, "flow accumulation (km2)")
+    #(twi, vis_params_twi, "TWI"),
+    (twi, vis_twi, "TWI (2σ)"),
+    (ee_flow_accumulation, {}, "Flow accumulation (km2)"),
+    (cti, vis_cti, "CTI (Hydrography90m)")
     # (out.select("Slope"), vis_params_slope, "Slope"),
     # (out.select("elv"), vis_params_dem, "Elevation")
 ])
