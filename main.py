@@ -19,6 +19,8 @@ from scripts.flow_direction_dz_mfd import compute_flow_direction_dz_mfd
 from scripts.flow_accumulation_quinn_cit import compute_flow_accumulation_quinn_cit
 from scripts.flow_accumulation_sfd_inf import compute_flow_accumulation_sfd_inf
 
+from scripts.push_to_ee import push_array_to_ee_geotiff 
+
 from scripts.slope import compute_slope
 
 from scripts.twi import compute_twi
