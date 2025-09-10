@@ -39,11 +39,11 @@ center = geometry.centroid().coordinates().getInfo()
 
 # Načtení DEM
 # Load SRTM DEM 30m
-#dem_raw = ee.Image('USGS/SRTMGL1_003').select('elevation')
+dem_raw = ee.Image('USGS/SRTMGL1_003').select('elevation')
 # SRTM 90m
 #dem_raw = ee.Image('CGIAR/SRTM90_V4').select('elevation')
 # MERIT 90m
-dem_raw = ee.Image("MERIT/Hydro/v1_0_1").select("elv")
+#dem_raw = ee.Image("MERIT/Hydro/v1_0_1").select("elv")
 
 scale = dem_raw.projection().nominalScale().getInfo()
 
@@ -68,17 +68,17 @@ flow_sfd = compute_flow_direction_sfd_inf(dem_out, transform, nodata_mask=nodata
 #flow_dz = compute_flow_direction_dz_mfd(dem_out, p=1.6, nodata_mask=nodata_mask)
 
 # Compute flow accumulation
-acc_km2 = compute_flow_accumulation_sfd_inf(flow_sfd, pixel_area_m2=px_area,
-                                  nodata_mask=nodata_mask, out='km2')
+#acc_km2 = compute_flow_accumulation_sfd_inf(flow_sfd, pixel_area_m2=px_area,
+#                                  nodata_mask=nodata_mask, out='km2')
 
 #acc_km2 = compute_flow_accumulation_quinn_cit(flow_dz, pixel_area_m2=px_area, nodata_mask=nodata_mask, out='km2')
 
-#acc_cells = compute_flow_accumulation_sfd_inf(flow_dz, nodata_mask=nodata_mask, out='cells')
+acc_cells = compute_flow_accumulation_sfd_inf(flow_sfd, nodata_mask=nodata_mask, out='cells')
 #acc_cells = compute_flow_accumulation_quinn_cit(flow_dz, pixel_area_m2=None, nodata_mask=nodata_mask, out='cells')
 
 # Push numpy array to ee.Image GeoTIFF
 dict_acc = push_array_to_ee_geotiff(
-    acc_km2,
+    acc_cells,
     transform=transform,
     crs=grid["crs"],
     nodata_mask=nodata_mask,
@@ -130,9 +130,9 @@ vis_cti = vis_2sigma(cti, "b1", geometry, scale, k=2.0,
 # Create the map
 Map = visualize_map([
     #(twi, vis_params_twi, "TWI"),
-    (twi, vis_twi, "TWI (2σ)"),
     (ee_flow_accumulation, {}, "Flow accumulation (km2)"),
-    (cti, vis_cti, "CTI (Hydrography90m)")
+    (cti, vis_cti, "CTI (Hydrography90m)"),
+    (twi, vis_twi, "TWI (2σ)")
     # (out.select("Slope"), vis_params_slope, "Slope"),
     # (out.select("elv"), vis_params_dem, "Elevation")
 ])
