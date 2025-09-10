@@ -50,6 +50,7 @@ dem_out, flatmask, labels, stats = resolve_flats_barnes(
 flow_sfd = compute_flow_direction_sfd_inf(dem_out, transform, nodata_mask=nodata_mask)
 
 # Compute flow accumulation
+
 acc_km2 = compute_flow_accumulation_sfd_inf(flow_sfd, pixel_area_m2=px_area,
                                   nodata_mask=nodata_mask, out='km2')
 
