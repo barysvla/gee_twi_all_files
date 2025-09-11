@@ -581,6 +581,260 @@ def resolve_flats_barnes(
     }
     return dem_out, FlatMask.astype(np.int32), labels, stats
 
+# asi lepsi
+# import numpy as np
+# from collections import deque
+# from typing import Tuple, Dict
+
+# def resolve_flats_barnes(
+#     dem: np.ndarray,
+#     nodata: float = np.nan,
+#     *,
+#     epsilon: float = 2e-5,
+#     equal_tol: float = 3e-3,         # default tuned for 30 m FABDEM & PySheds parity
+#     lower_tol: float = 0.0,          # strict "lower" detection
+#     treat_oob_as_lower: bool = True,
+#     require_low_edge_only: bool = True,
+#     force_all_flats: bool = False
+# ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, int]]:
+#     """
+#     Resolve flat areas in a filled DEM by superimposing a tiny monotone gradient
+#     away from higher edges and toward lower edges (Barnes 2014, improved GM'97).
+#     Only flats with outlets are modified when require_low_edge_only=True.
+
+#     Parameters
+#     ----------
+#     dem : 2D array (float)
+#         Filled DEM (no depressions). Must be 2D.
+#     nodata : float or NaN
+#         NoData marker. NaNs are treated as invalid.
+#     epsilon : float
+#         Step size for the synthetic gradient.
+#     equal_tol : float
+#         Equality tolerance for plateau membership & tie checks.
+#     lower_tol : float
+#         Strictness for "neighbor is lower" tests (dz < -lower_tol).
+#     treat_oob_as_lower : bool
+#         Treat raster boundary as a lower edge (recommended True).
+#     require_low_edge_only : bool
+#         If True, resolve only flats that have an actual outlet (Barnes).
+#     force_all_flats : bool
+#         If True and a plateau has no outlet, force resolution by seeding its perimeter.
+
+#     Returns
+#     -------
+#     dem_out : float32 DEM with tiny gradient imposed over resolved flats
+#     flatmask : int32 field of weights added (unitless)
+#     labels : int32 plateau labels (0 = non-flat)
+#     stats : dict with counts
+#     """
+#     Z = np.asarray(dem)
+#     if Z.ndim != 2:
+#         raise ValueError("DEM must be 2D")
+#     nrows, ncols = Z.shape
+
+#     # Valid mask
+#     if np.isnan(nodata):
+#         valid = np.isfinite(Z)
+#     else:
+#         valid = (Z != nodata) & np.isfinite(Z)
+
+#     OFFS8 = [(-1,-1),(-1,0),(-1,1),
+#              ( 0,-1),       ( 0,1),
+#              ( 1,-1),( 1,0),( 1,1)]
+#     def inb(i, j): return (0 <= i < nrows) and (0 <= j < ncols)
+
+#     # --- 1) Precompute: has a strictly lower neighbor? (with lower_tol)
+#     has_lower8 = np.zeros_like(valid, dtype=bool)
+#     for di, dj in OFFS8:
+#         i0, i1 = max(0, -di), min(nrows, nrows - di)
+#         j0, j1 = max(0, -dj), min(ncols, ncols - dj)
+#         if i0 >= i1 or j0 >= j1:
+#             continue
+#         a = Z[i0:i1, j0:j1]
+#         b = Z[i0+di:i1+di, j0+dj:j1+dj]
+#         v = valid[i0:i1, j0:j1] & valid[i0+di:i1+di, j0+dj:j1+dj]
+#         # neighbor lower if (b - a) < -lower_tol  <=>  a - b > lower_tol
+#         has_lower8[i0:i1, j0:j1] |= v & ((b - a) < -lower_tol)
+
+#     # Flat cells: valid & no strictly lower neighbor
+#     flats = valid & (~has_lower8)
+
+#     # --- 2) Label plateaus (8-connected), compare to CURRENT cell (not seed)
+#     labels = np.zeros_like(valid, dtype=np.int32)
+#     cur = 0
+#     for i in range(nrows):
+#         for j in range(ncols):
+#             if flats[i, j] and labels[i, j] == 0:
+#                 cur += 1
+#                 q = deque([(i, j)])
+#                 labels[i, j] = cur
+#                 while q:
+#                     ci, cj = q.popleft()
+#                     zc = Z[ci, cj]
+#                     for di, dj in OFFS8:
+#                         ni, nj = ci + di, cj + dj
+#                         if (inb(ni, nj)
+#                             and flats[ni, nj]
+#                             and labels[ni, nj] == 0
+#                             and abs(Z[ni, nj] - zc) <= equal_tol):
+#                             labels[ni, nj] = cur
+#                             q.append((ni, nj))
+
+#     if cur == 0:
+#         dem_out = Z.astype(np.float32, copy=True)
+#         dem_out[~valid] = (np.nan if np.isnan(nodata) else nodata)
+#         stats = {"n_flats": 0, "n_flats_active": 0, "n_flat_cells": 0, "n_changed_cells": 0}
+#         return dem_out, np.zeros_like(labels, np.int32), labels, stats
+
+#     # --- 3) Build edge queues & outlet flags per plateau
+#     HighEdges = [deque() for _ in range(cur + 1)]
+#     LowEdges  = [deque() for _ in range(cur + 1)]
+#     has_low   = np.zeros(cur + 1, dtype=bool)
+#     has_high  = np.zeros(cur + 1, dtype=bool)
+
+#     for i in range(nrows):
+#         for j in range(ncols):
+#             lbl = labels[i, j]
+#             if lbl == 0:
+#                 continue
+#             z0 = Z[i, j]
+#             adj_higher = False
+#             adj_lower  = False
+#             is_boundary = False
+#             for di, dj in OFFS8:
+#                 ni, nj = i + di, j + dj
+#                 if not inb(ni, nj) or not valid[ni, nj]:
+#                     is_boundary = True
+#                     if treat_oob_as_lower:
+#                         adj_lower = True
+#                     continue
+#                 if labels[ni, nj] != lbl:
+#                     dz = Z[ni, nj] - z0
+#                     if dz >  equal_tol:
+#                         adj_higher = True
+#                     # strictly lower neighbor
+#                     if dz < -lower_tol:
+#                         adj_lower = True
+#                     # cascade: equal neighbor which itself has a lower neighbor
+#                     elif abs(dz) <= equal_tol and has_lower8[ni, nj]:
+#                         adj_lower = True
+
+#             if adj_lower:
+#                 LowEdges[lbl].append((i, j)); has_low[lbl]  = True
+#             if adj_higher:
+#                 HighEdges[lbl].append((i, j)); has_high[lbl] = True
+
+#             # Optional fallback: if forcing closed plateaus, seed perimeter as pseudo-low
+#             if force_all_flats and not adj_lower:
+#                 if (not inb(i-1, j)) or (not inb(i+1, j)) or (not inb(i, j-1)) or (not inb(i, j+1)):
+#                     # already boundary; treated above
+#                     pass
+
+#     # If forcing flats without outlets, seed full perimeter now
+#     if force_all_flats:
+#         for lbl in range(1, cur + 1):
+#             if has_low[lbl]:
+#                 continue
+#             # perimeter = at least one neighbor not in the label (or invalid/OOB)
+#             for i in range(nrows):
+#                 for j in range(ncols):
+#                     if labels[i, j] != lbl:
+#                         continue
+#                     perim = False
+#                     for di, dj in OFFS8:
+#                         ni, nj = i + di, j + dj
+#                         if not inb(ni, nj) or (not valid[ni, nj]) or (labels[ni, nj] != lbl):
+#                             perim = True
+#                             break
+#                     if perim:
+#                         LowEdges[lbl].append((i, j))
+#             if len(LowEdges[lbl]) > 0:
+#                 has_low[lbl] = True
+
+#     def flat_active(lbl: int) -> bool:
+#         if require_low_edge_only:
+#             return has_low[lbl]       # resolve only flats with outlets (Barnes)
+#         # otherwise: allow either natural outlet or forced perimeter
+#         return has_low[lbl] or force_all_flats
+
+#     # --- 4) Two BFS passes: away-from-higher, toward-lower; combine weights
+#     away     = np.full(labels.shape, -1, dtype=np.int32)
+#     towards  = np.full(labels.shape, -1, dtype=np.int32)
+#     FlatMask = np.zeros_like(labels, dtype=np.int32)
+#     FlatH    = np.zeros(cur + 1, dtype=np.int32)
+
+#     # A) From higher edge (away)
+#     for lbl in range(1, cur + 1):
+#         if not flat_active(lbl):
+#             continue
+#         q = HighEdges[lbl]
+#         if not q:
+#             continue
+#         for si, sj in q:
+#             away[si, sj] = 1
+#         while q:
+#             ci, cj = q.popleft()
+#             cl = away[ci, cj]
+#             if cl > FlatH[lbl]:
+#                 FlatH[lbl] = cl
+#             for di, dj in OFFS8:
+#                 ni, nj = ci + di, cj + dj
+#                 if inb(ni, nj) and labels[ni, nj] == lbl and away[ni, nj] == -1:
+#                     away[ni, nj] = cl + 1
+#                     q.append((ni, nj))
+
+#     # B) Toward lower edge (dominant 2*dist) and combine with away
+#     drainable = 0
+#     active_flats = 0
+#     for lbl in range(1, cur + 1):
+#         if not flat_active(lbl):
+#             continue
+#         q = LowEdges[lbl]
+#         if not q:
+#             continue
+#         active_flats += 1
+#         if has_low[lbl]:
+#             drainable += 1
+
+#         for si, sj in q:
+#             towards[si, sj] = 1
+#         while q:
+#             ci, cj = q.popleft()
+#             cl = towards[ci, cj]
+#             if away[ci, cj] != -1:
+#                 FlatMask[ci, cj] = (FlatH[lbl] - away[ci, cj]) + 2 * cl
+#             else:
+#                 FlatMask[ci, cj] = 2 * cl
+#             for di, dj in OFFS8:
+#                 ni, nj = ci + di, cj + dj
+#                 if inb(ni, nj) and labels[ni, nj] == lbl and towards[ni, nj] == -1:
+#                     towards[ni, nj] = cl + 1
+#                     q.append((ni, nj))
+
+#     # --- 5) Apply tiny gradient over active flats
+#     dem_out = Z.astype(np.float32, copy=True)
+#     inc = (labels > 0) & valid & (FlatMask != 0)
+#     dem_out[inc] = dem_out[inc] + epsilon * FlatMask[inc]
+
+#     # keep nodata
+#     if np.isnan(nodata):
+#         dem_out[~valid] = np.nan
+#     else:
+#         dem_out[~valid] = nodata
+
+#     stats = {
+#         "n_flats": int(cur),
+#         "n_flats_active": int(active_flats),
+#         "n_flats_drainable": int(drainable),
+#         "n_flat_cells": int(np.count_nonzero(labels)),
+#         "n_changed_cells": int(np.count_nonzero(inc)),
+#         "equal_tol": float(equal_tol),
+#         "lower_tol": float(lower_tol),
+#         "require_low_edge_only": bool(require_low_edge_only),
+#         "force_all_flats": bool(force_all_flats),
+#     }
+#     return dem_out, FlatMask.astype(np.int32), labels, stats
 #-------------------------------------------------------------------
 # TIE MODIFIKACE- dava zmenenych 10 k ale...
 import numpy as np
