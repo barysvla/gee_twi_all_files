@@ -38,14 +38,31 @@ geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
 center = geometry.centroid().coordinates().getInfo()
 
 # Načtení DEM
-# Load SRTM DEM 30m
-dem_raw = ee.Image('USGS/SRTMGL1_003').select('elevation')
+# FABDEM
+ic = ee.ImageCollection("projects/sat-io/open-datasets/FABDEM")
+# Copernicus GLO-30 ----------------------------
+# 1) Collection
+#ic = ee.ImageCollection('COPERNICUS/DEM/GLO30').select('DEM')  # DSM, band='DEM'  :contentReference[oaicite:1]{index=1}
+
+# 2) Získej projekci/scale ze „seed“ dlaždice (před mozaikou)
+seed = ic.first()
+proj = seed.projection()                         # má crs + transform
+scale = proj.nominalScale().getInfo()            # ~30 m
+
+# 3) Slož mozaiku a nastav jí defaultní projekci seed dlaždice
+dem_raw = (ic.filterBounds(geometry)
+             .mosaic()
+             .setDefaultProjection(proj))         # klíčový krok
+             #.clip(geometry))                    # teď má validní projekci
+# ----------------------------------------------
+# SRTM DEM 30m
+#dem_raw = ee.Image('USGS/SRTMGL1_003').select('elevation')
 # SRTM 90m
 #dem_raw = ee.Image('CGIAR/SRTM90_V4').select('elevation')
 # MERIT 90m
 #dem_raw = ee.Image("MERIT/Hydro/v1_0_1").select("elv")
 
-scale = dem_raw.projection().nominalScale().getInfo()
+#scale = dem_raw.projection().nominalScale().getInfo()
 
 # Right grid
 grid = prepare_aligned_dem_and_pixelarea(dem_raw, geometry)
@@ -102,17 +119,17 @@ cti_ic = ee.ImageCollection("projects/sat-io/open-datasets/HYDROGRAPHY90/flow_in
 cti = cti_ic.mosaic().toFloat().clip(geometry)
 
 # Visualization
-vis_twi = vis_2sigma(twi, "TWI_scaled", geometry, scale, k=2.0,
-                     palette=["#ff0000","#ffa500","#ffff00","#90ee90","#0000ff"])
+#vis_twi = vis_2sigma(twi, "TWI_scaled", geometry, scale, k=2.0,
+#                     palette=["#ff0000","#ffa500","#ffff00","#90ee90","#0000ff"])
 
-vis_cti = vis_2sigma(cti, "b1", geometry, scale, k=2.0,
-                     palette=["#ff0000","#ffa500","#ffff00","#90ee90","#0000ff"])
-# vis_params_twi = {
-#     "min": -529168144.8390943,
-#     "max": 2694030.111316502,
-#     "opacity": 1,
-#     "palette": ["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
-# }
+#vis_cti = vis_2sigma(cti, "b1", geometry, scale, k=2.0,
+#                     palette=["#ff0000","#ffa500","#ffff00","#90ee90","#0000ff"])
+vis_params_twi = {
+    "min": -529168144.8390943,
+    "max": 2694030.111316502,
+    "opacity": 1,
+    "palette": ["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
+}
 
 # vis_params_slope = {
 #     "bands": ["Slope"],
@@ -131,8 +148,8 @@ vis_cti = vis_2sigma(cti, "b1", geometry, scale, k=2.0,
 Map = visualize_map([
     #(twi, vis_params_twi, "TWI"),
     (ee_flow_accumulation, {}, "Flow accumulation (km2)"),
-    (cti, vis_cti, "CTI (Hydrography90m)"),
-    (twi, vis_twi, "TWI (2σ)")
+    (cti, vis_params_twi, "CTI (Hydrography90m)"),
+    (twi, vis_params_twi, "TWI (2σ)")
     # (out.select("Slope"), vis_params_slope, "Slope"),
     # (out.select("elv"), vis_params_dem, "Elevation")
 ])
