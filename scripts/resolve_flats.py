@@ -211,7 +211,7 @@ from collections import deque
 def resolve_flats_towards_lower_edge_gm(
     dem,
     nodata=np.nan,
-    epsilon=1e-5,
+    epsilon=2e-5,
     equal_tol=1e-3,           # rovnost pro labelování plošin
     lower_tol=0.0,            # prah pro "přísně nižšího" souseda
     equality_connectivity=4,  # 4 je bližší literatuře; 8 lze povolit
@@ -836,14 +836,14 @@ def resolve_flats_barnes(
 #     }
 #     return dem_out, FlatMask.astype(np.int32), labels, stats
 #-------------------------------------------------------------------
-# TIE MODIFIKACE- dava zmenenych 10 k ale...
+# TIE MODIFIKACE
 import numpy as np
 from collections import deque
 
 def resolve_flats_barnes_tie(
     dem,
     nodata=np.nan,
-    epsilon=1e-5,           # sníženo o řád (kvůli rozsahu Δ)
+    epsilon=2e-5,           # sníženo o řád (kvůli rozsahu Δ)
     equal_tol=1e-3,
     lower_tol=0.0,
     treat_oob_as_lower=True,
@@ -1019,12 +1019,246 @@ def resolve_flats_barnes_tie(
     }
     return dem_out, FlatMask.astype(np.int32), labels, stats
 
+# TIE FAST ----------------------------------------
+import numpy as np
+from collections import deque
+from typing import Tuple, Dict
+
+OFFS8 = [(-1,-1),(-1,0),(-1,1),
+         ( 0,-1),       ( 0,1),
+         ( 1,-1),( 1,0),( 1,1)]
+
+def resolve_flats_barnes_tie_fast(
+    dem: np.ndarray,
+    nodata: float = np.nan,
+    *,
+    epsilon: float = 2e-5,          # tiny monotone gradient step
+    equal_tol: float = 3e-3,        # tuned for 30 m FABDEM (parity with PySheds)
+    lower_tol: float = 0.0,         # strict "lower" test
+    treat_oob_as_lower: bool = True,
+    require_low_edge_only: bool = True,
+    force_all_flats: bool = False,
+    include_equal_ties: bool = True # include equal-elevation "ties" into plateau during labeling
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, int]]:
+    """
+    Barnes/GM-style flat resolution with a single-pass labeling that can optionally
+    absorb equal-elevation 'tie' cells during BFS expansion. Complexity ~O(N).
+
+    Returns:
+        dem_out: float32 DEM with epsilon*FlatMask added on flat areas
+        FlatMask: int32 weights (superposition of 'away' and 'towards' BFS)
+        labels: int32 plateau labels (0 = non-flat)
+        stats: dict with counts
+    """
+    Z = np.asarray(dem, dtype=np.float64)
+    if Z.ndim != 2:
+        raise ValueError("DEM must be 2D")
+    nrows, ncols = Z.shape
+
+    # Valid mask
+    valid = np.isfinite(Z) if np.isnan(nodata) else ((Z != nodata) & np.isfinite(Z))
+
+    def inb(i, j): return (0 <= i < nrows) and (0 <= j < ncols)
+
+    # 1) Precompute: has strictly-lower neighbor?  (vectorized windowing per offset)
+    has_lower8 = np.zeros_like(valid, dtype=bool)
+    for di, dj in OFFS8:
+        i0, i1 = max(0, -di), min(nrows, nrows - di)
+        j0, j1 = max(0, -dj), min(ncols, ncols - dj)
+        if i0 >= i1 or j0 >= j1:
+            continue
+        a = Z[i0:i1, j0:j1]
+        b = Z[i0+di:i1+di, j0+dj:j1+dj]
+        v = valid[i0:i1, j0:j1] & valid[i0+di:i1+di, j0+dj:j1+dj]
+        has_lower8[i0:i1, j0:j1] |= v & ((b - a) < -lower_tol)
+
+    # Flats = valid & no strictly-lower neighbor
+    flats = valid & (~has_lower8)
+
+    # 2) Single-pass plateau labeling:
+    #    - Seeds are true flats.
+    #    - Expansion criterion:
+    #        a) always 8-connected
+    #        b) |Z[nb] - Z[cur]| <= equal_tol
+    #        c) if include_equal_ties: neighbor may be non-flat; else must be flats[nb]
+    labels = np.zeros_like(valid, dtype=np.int32)
+    cur = 0
+    for i in range(nrows):
+        for j in range(ncols):
+            if flats[i, j] and labels[i, j] == 0:
+                cur += 1
+                q = deque([(i, j)])
+                labels[i, j] = cur
+                while q:
+                    ci, cj = q.popleft()
+                    zc = Z[ci, cj]
+                    for di, dj in OFFS8:
+                        ni, nj = ci + di, cj + dj
+                        if not inb(ni, nj) or not valid[ni, nj] or labels[ni, nj] != 0:
+                            continue
+                        if abs(Z[ni, nj] - zc) > equal_tol:
+                            continue
+                        if (not include_equal_ties) and (not flats[ni, nj]):
+                            continue
+                        labels[ni, nj] = cur
+                        q.append((ni, nj))
+
+    if cur == 0:
+        dem_out = Z.copy() 
+        dem_out[~valid] = (np.nan if np.isnan(nodata) else nodata)
+        stats = {"n_flats": 0, "n_flats_active": 0, "n_flats_drainable": 0,
+                 "n_flat_cells": 0, "n_changed_cells": 0}
+        return dem_out, np.zeros_like(labels, np.int32), labels, stats
+
+    # 3) Build edges per plateau (cascade to lower through equal neighbors that have lower)
+    HighEdges = [deque() for _ in range(cur + 1)]
+    LowEdges  = [deque() for _ in range(cur + 1)]
+    has_low   = np.zeros(cur + 1, dtype=bool)
+
+    for i in range(nrows):
+        for j in range(ncols):
+            lbl = labels[i, j]
+            if lbl == 0:
+                continue
+            z0 = Z[i, j]
+            adj_higher = False
+            adj_lower  = False
+            is_boundary = False
+            for di, dj in OFFS8:
+                ni, nj = i + di, j + dj
+                if not inb(ni, nj) or not valid[ni, nj]:
+                    is_boundary = True
+                    if treat_oob_as_lower:
+                        adj_lower = True
+                    continue
+                if labels[ni, nj] != lbl:
+                    dz = Z[ni, nj] - z0
+                    if dz >  equal_tol:
+                        adj_higher = True
+                    if dz < -lower_tol:
+                        adj_lower = True
+                    elif abs(dz) <= equal_tol and has_lower8[ni, nj]:
+                        # cascade: equal neighbor which itself has a lower neighbor
+                        adj_lower = True
+            if adj_lower:
+                LowEdges[lbl].append((i, j)); has_low[lbl] = True
+            if adj_higher:
+                HighEdges[lbl].append((i, j))
+
+            # optional fallback for closed plateaus
+            if force_all_flats and not adj_lower and is_boundary:
+                LowEdges[lbl].append((i, j)); has_low[lbl] = True
+
+    # If forcing closed plateaus: seed their full perimeter once (cheap single pass)
+    if force_all_flats:
+        for lbl in range(1, cur + 1):
+            if has_low[lbl]:
+                continue
+            # perimeter = at least one neighbor not in the label (or invalid/OOB)
+            seeded = False
+            for i in range(nrows):
+                for j in range(ncols):
+                    if labels[i, j] != lbl:
+                        continue
+                    for di, dj in OFFS8:
+                        ni, nj = i + di, j + dj
+                        if not inb(ni, nj) or (not valid[ni, nj]) or (labels[ni, nj] != lbl):
+                            LowEdges[lbl].append((i, j))
+                            seeded = True
+                            break
+                # micro-early exit if we already found some perimeter cells
+            if seeded:
+                has_low[lbl] = True
+
+    def flat_active(lbl: int) -> bool:
+        if require_low_edge_only:
+            return has_low[lbl]         # resolve only flats with outlets
+        return has_low[lbl] or force_all_flats
+
+    # 4) Two BFS passes: away-from-higher & towards-lower; combine as FlatMask
+    away     = np.full(labels.shape, -1, dtype=np.int32)
+    towards  = np.full(labels.shape, -1, dtype=np.int32)
+    FlatMask = np.zeros_like(labels, dtype=np.int32)
+    FlatH    = np.zeros(cur + 1, dtype=np.int32)
+
+    # A) away-from-higher
+    for lbl in range(1, cur + 1):
+        if not flat_active(lbl):
+            continue
+        q = HighEdges[lbl]
+        if not q:
+            continue
+        for si, sj in q:
+            away[si, sj] = 1
+        while q:
+            ci, cj = q.popleft()
+            cl = away[ci, cj]
+            if cl > FlatH[lbl]:
+                FlatH[lbl] = cl
+            for di, dj in OFFS8:
+                ni, nj = ci + di, cj + dj
+                if 0 <= ni < nrows and 0 <= nj < ncols and labels[ni, nj] == lbl and away[ni, nj] == -1:
+                    away[ni, nj] = cl + 1
+                    q.append((ni, nj))
+
+    # B) towards-lower (dominant) + combine
+    drainable = 0
+    active_flats = 0
+    for lbl in range(1, cur + 1):
+        if not flat_active(lbl):
+            continue
+        q = LowEdges[lbl]
+        if not q:
+            continue
+        active_flats += 1
+        if has_low[lbl]:
+            drainable += 1
+        for si, sj in q:
+            towards[si, sj] = 1
+        while q:
+            ci, cj = q.popleft()
+            cl = towards[ci, cj]
+            if away[ci, cj] != -1:
+                FlatMask[ci, cj] = (FlatH[lbl] - away[ci, cj]) + 2 * cl
+            else:
+                FlatMask[ci, cj] = 2 * cl
+            for di, dj in OFFS8:
+                ni, nj = ci + di, cj + dj
+                if 0 <= ni < nrows and 0 <= nj < ncols and labels[ni, nj] == lbl and towards[ni, nj] == -1:
+                    towards[ni, nj] = cl + 1
+                    q.append((ni, nj))
+
+    # 5) Apply epsilon*FlatMask
+    dem_out = Z.copy()
+    inc = (labels > 0) & valid & (FlatMask != 0)
+    dem_out[inc] = dem_out[inc] + epsilon * FlatMask[inc]
+
+    if np.isnan(nodata):
+        dem_out[~valid] = np.nan
+    else:
+        dem_out[~valid] = nodata
+
+    stats = {
+        "n_flats": int(cur),
+        "n_flats_active": int(active_flats),
+        "n_flats_drainable": int(drainable),
+        "n_flat_cells": int(np.count_nonzero(labels)),
+        "n_changed_cells": int(np.count_nonzero(inc)),
+        "equal_tol": float(equal_tol),
+        "lower_tol": float(lower_tol),
+        "require_low_edge_only": bool(require_low_edge_only),
+        "force_all_flats": bool(force_all_flats),
+        "include_equal_ties": bool(include_equal_ties),
+        "epsilon": float(epsilon),
+    }
+    return dem_out, FlatMask.astype(np.int32), labels, stats
+
 # -------------------------------------------------------
 # Cascade
 def resolve_flats_barnes_cascade(
     dem,
     nodata=np.nan,
-    epsilon=1e-5,
+    epsilon=2e-5,
     equal_tol=1e-6,           # přísné spojování plošin
     lower_tol=0.0,            # „nižší“ je opravdu nižší
     treat_oob_as_lower=False, # <<< vypnuto, ať to neteče ven z domény
