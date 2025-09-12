@@ -20,8 +20,8 @@ def export_dem_and_area_to_arrays(
     """Build mosaic (if needed), fix projection, align region, export DEM+pixelArea on identical grid, read back.
 
     Returns dict with:
-        dem               : (H,W) float32 ndarray, NaN = NoData
-        pixel_area_m2     : (H,W) float32 ndarray
+        dem               : (H,W) float64 ndarray, NaN = NoData
+        pixel_area_m2     : (H,W) float64 ndarray
         transform         : rasterio Affine
         crs               : rasterio CRS
         nodata_mask       : (H,W) bool
@@ -86,7 +86,7 @@ def export_dem_and_area_to_arrays(
 
     dem_for_export = (
          img_rs
-        .toFloat()
+        .toDouble()
         .unmask(nodata_value)                 # fill masked pixels with a stable NoData
     )
 
@@ -105,13 +105,13 @@ def export_dem_and_area_to_arrays(
 
     # --- 6) Načtení přes rasterio ---
     with rasterio.open(dem_path) as src_dem:
-        dem_band  = src_dem.read(1).astype("float32")
+        dem_band  = src_dem.read(1).astype("float64")
         transform = src_dem.transform
         out_crs   = src_dem.crs
         nd_src    = src_dem.nodata  # může být None (ale my jsme NoData zapsali do pixelů)
 
     with rasterio.open(px_path) as src_px:
-        px = src_px.read(1).astype("float32")
+        px = src_px.read(1).astype("float64")
         # přísná kontrola zarovnání
         if (src_px.transform != transform) or (src_px.crs != out_crs) or \
            (src_px.width != dem_band.shape[1]) or (src_px.height != dem_band.shape[0]):
