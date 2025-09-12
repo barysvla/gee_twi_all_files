@@ -836,11 +836,11 @@ def resolve_flats_barnes(
 #     }
 #     return dem_out, FlatMask.astype(np.int32), labels, stats
 #-------------------------------------------------------------------
-# TIE MODIFIKACE
+# TIE MODIFIKACE- dava zmenenych 10 k ale...
 import numpy as np
 from collections import deque
 
-def resolve_flats_barnes_tie(
+def resolve_flats_barnes_tie_slow(
     dem,
     nodata=np.nan,
     epsilon=2e-5,           # sníženo o řád (kvůli rozsahu Δ)
@@ -1028,7 +1028,7 @@ OFFS8 = [(-1,-1),(-1,0),(-1,1),
          ( 0,-1),       ( 0,1),
          ( 1,-1),( 1,0),( 1,1)]
 
-def resolve_flats_barnes_tie_fast(
+def resolve_flats_barnes_tie(
     dem: np.ndarray,
     nodata: float = np.nan,
     *,
