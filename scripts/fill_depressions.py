@@ -32,9 +32,9 @@ def priority_flood_fill(
 
     Returns
     -------
-    filled : 2D float32
+    filled : 2D float64
         Depression-filled DEM.
-    depth  : 2D float32 (optional)
+    depth  : 2D float64 (optional)
         Amount of fill applied per cell (returned only if return_fill_depth=True).
     """
     Z = np.asarray(dem, dtype=np.float64)
@@ -89,13 +89,17 @@ def priority_flood_fill(
             heapq.heappush(pq, (filled[ni, nj], ni, nj))
 
     # outputs
-    filled = filled.astype(np.float32)
-    if np.isnan(nodata): filled[~valid] = np.nan
-    else:                filled[~valid] = nodata
+    if np.isnan(nodata):
+        filled[~valid] = np.nan
+    else:
+       filled[~valid] = float(nodata)
 
     if return_fill_depth:
-        depth = (filled.astype(np.float64) - Z).astype(np.float32)
-        if np.isnan(nodata): depth[~valid] = np.nan
-        else:                depth[~valid] = 0.0
-        return filled, depth
+        depth = (filled - Z)  # both float64
+    if np.isnan(nodata):
+        depth[~valid] = np.nan
+    else:
+        depth[~valid] = 0.0
+    return filled, depth
+
     return filled
