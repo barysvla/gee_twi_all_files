@@ -38,27 +38,27 @@ center = geometry.centroid().coordinates().getInfo()
 
 # Načtení DEM
 # 1) Collection
-# FABDEM 30
-#dem_raw = ee.ImageCollection("projects/sat-io/open-datasets/FABDEM")
+# FABDEM 30m
+dem_raw = ee.ImageCollection("projects/sat-io/open-datasets/FABDEM")
 
-# Copernicus GLO-30 ----------------------------
-#dem_raw = ee.ImageCollection('COPERNICUS/DEM/GLO30').select('DEM')  # DSM, band='DEM'  :contentReference[oaicite:1]{index=1}
+# Copernicus GLO-30
+#dem_raw = ee.ImageCollection('COPERNICUS/DEM/GLO30').select('DEM')  # DSM, band='DEM'
 
 # ALOS World 3D 30 m
 #dem_raw = ee.ImageCollection("JAXA/ALOS/AW3D30/V4_1").select('DSM')  # DSM, band='DSM'
 
-# Image
-# 1)
+# 1) Image ----------------------------
 # SRTM DEM 30m
 #dem_raw = ee.Image('USGS/SRTMGL1_003').select('elevation')
 # NASA SRTM 30m 
-dem_raw = ee.Image("NASA/NASADEM_HGT/001").select('elevation')
+#dem_raw = ee.Image("NASA/NASADEM_HGT/001").select('elevation')
+# ASTER 30m
+#dem_raw = ee.Image("projects/sat-io/open-datasets/ASTER/GDEM").select('b1');
+
 # SRTM 90m
 #dem_raw = ee.Image('CGIAR/SRTM90_V4').select('elevation')
 # MERIT 90m
 #dem_raw = ee.Image("MERIT/Hydro/v1_0_1").select("elv")
-# ASTER 30m
-#dem_raw = ee.Image("projects/sat-io/open-datasets/ASTER/GDEM").select('b1');
 
 grid = export_dem_and_area_to_arrays(
     src=dem_raw,
