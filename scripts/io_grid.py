@@ -7,17 +7,19 @@ import os
 
 def export_dem_and_area_to_arrays(
     src,                         # ee.ImageCollection | ee.Image | asset-id (str)
-    region_geom: ee.Geometry,    # vstupní zájmové území (ne nutně zarovnané)
+    region_geom: ee.Geometry,
     *,
-    band: str | None = None,     # např. 'DEM' pro Copernicus; FABDEM je single-band -> None
-    resample_method: str = "bilinear",  # 'nearest' pro ostré okraje; 'bilinear' pro plynulý DEM
+    band: str | None = None,     # e.g., 'DEM' for Copernicus; FABDEM is single-band -> None
+    resample_method: str = "bilinear",  # 'nearest' for crisp edges; 'bilinear' for smooth DEM
     nodata_value: float = -9999.0,
-    snap_region_to_grid: bool = True,   # zarovnání regionu na mřížku DEM (doporučeno)
+    snap_region_to_grid: bool = True,
     tmp_dir: str | None = None,
     dem_filename: str = "dem.tif",
     px_filename: str  = "pixel_area.tif",
 ):
-    """Build mosaic (if needed), fix projection, align region, export DEM+pixelArea on identical grid, read back.
+    """
+    Build mosaic (if needed), fix projection, align region, export DEM+pixelArea on identical grid,
+    read back as numpy, and also return aligned ee.Images on the same grid.
 
     Returns dict with:
         dem               : (H,W) float64 ndarray, NaN = NoData
@@ -25,14 +27,16 @@ def export_dem_and_area_to_arrays(
         transform         : rasterio Affine
         crs               : rasterio CRS
         nodata_mask       : (H,W) bool
-        nd_value          : float (NoData uložené v TIFF)
+        nd_value          : float
         projection_info   : {'crs': str, 'transform': list|None}
-        scale_m           : float | None (pokud nebyl k dispozici transform)
-        region_used       : ee.Geometry (region použitý pro export)
+        scale_m           : float | None
+        region_used       : ee.Geometry (aligned region)
+        ee_dem_grid       : ee.Image (masked DEM, reprojected to the same grid)
+        ee_px_area_grid   : ee.Image (pixelArea on the same grid, masked to DEM)
         paths             : {'dem': path, 'pixel_area': path}
         tmp_dir           : temp folder
     """
-    # --- 0) Vstup -> ee.Image s pevnou projekcí ---
+    # 0) Input -> ee.Image with stable projection (mosaic if collection)
     if isinstance(src, ee.image.Image):
         img = src if band is None else src.select([band])
         seed = img
@@ -40,33 +44,29 @@ def export_dem_and_area_to_arrays(
         ic = ee.ImageCollection(src) if isinstance(src, str) else src
         if band is not None:
             ic = ic.select([band])
-        seed = ic.first()                      # seed pro projekci
-        img  = (ic.filterBounds(region_geom)
-                  .mosaic())                   # mozaika z kolekce (mask-based)  # :contentReference[oaicite:4]{index=4}
+        # Optional: define ordering explicitly if needed (default mosaic is last-to-first)
+        # ic = ic.sort('system:time_start')  # uncomment if you prefer time-ordering
+        seed = ic.first()
+        img  = ic.filterBounds(region_geom).mosaic()  # masked mosaic; masked pixels remain masked. :contentReference[oaicite:1]{index=1}
 
     proj = seed.projection()
-    # Mozaice nastav nativní projekci seed dlaždice (jinak by měla WGS84/1°).  # :contentReference[oaicite:5]{index=5}
-    img  = img.setDefaultProjection(proj)      # :contentReference[oaicite:6]{index=6}
+    # Set default projection so downstream ops have a valid default (avoid reduceResolution errors). :contentReference[oaicite:2]{index=2}
+    img  = img.setDefaultProjection(proj)
 
-    # --- 1) Volitelné zarovnání regionu na mřížku DEM (bez chybného geometry(proj)) ---
+    # 1) Optionally snap region to the DEM grid
     if snap_region_to_grid:
         mask = ee.Image.constant(1).reproject(proj).clip(region_geom).selfMask()
-        g = mask.geometry()                                 # default EPSG:4326
-        g = g.transform(proj=proj, maxError=1)              # NAMED args, bez ErrorMargin chyby  # :contentReference[oaicite:7]{index=7}
+        g = mask.geometry().transform(proj=proj, maxError=1)
         region_aligned = g.bounds(maxError=1, proj=proj)
     else:
         region_aligned = region_geom
 
-    # --- 2) Export parametry (preferuj crs+transform; fallback scale) ---
+    # 2) Export params: prefer explicit crs+crsTransform (locks pixel origin/size). :contentReference[oaicite:3]{index=3}
     proj_info = proj.getInfo()
     crs = proj_info["crs"]
     crs_transform = proj_info.get("transform", None)
 
-    export_kwargs = {
-        "region": region_aligned,
-        "file_per_band": False,
-        "crs": crs,
-    }
+    export_kwargs = {"region": region_aligned, "file_per_band": False, "crs": crs}
     scale_m = None
     if crs_transform:
         export_kwargs["crs_transform"] = crs_transform
@@ -74,50 +74,58 @@ def export_dem_and_area_to_arrays(
         scale_m = ee.Image(img).projection().nominalScale().getInfo()
         export_kwargs["scale"] = float(scale_m)
 
-    # --- 3) Připrav EE snímky k exportu ---
-    # Choose resampling properly:
+    # 3) Resampling choice
     rm = (resample_method or "").lower()
     if rm in ("bilinear", "bicubic"):
-         img_rs = ee.Image(img).resample(rm)   # only these two are valid
+        img_rs = ee.Image(img).resample(rm)  # only these two are valid for resample() in EE
     elif rm in ("nearest", "", None):
-          img_rs = ee.Image(img)                # default is nearest-neighbor; do NOT call resample()
+        img_rs = ee.Image(img)               # default NN; do not call resample()
     else:
-         raise ValueError(f"Invalid resample_method: {resample_method}. Use 'bilinear', 'bicubic', or 'nearest'.")
+        raise ValueError(f"Invalid resample_method: {resample_method}. Use 'bilinear', 'bicubic', or 'nearest'.")
 
-    dem_for_export = (
-         img_rs
+    # ---- Aligned EE images on the exact same grid ----
+    # Force the exact grid using reproject(crs, crsTransform); keep mask for slope. :contentReference[oaicite:4]{index=4}
+    ee_dem_grid = (
+        ee.Image(img_rs)
         .toDouble()
-        .unmask(nodata_value)                 # fill masked pixels with a stable NoData
+        .reproject(crs=crs, crsTransform=crs_transform)
+        .clip(region_aligned)
+        .updateMask(ee.Image(img).mask())
     )
+    ee_px_area_grid = (
+        ee.Image.pixelArea()                            # m² per pixel
+        .reproject(crs=crs, crsTransform=crs_transform)  # lock to same grid
+        .updateMask(ee.Image(img).mask())
+        .clip(region_aligned)
+    )  # :contentReference[oaicite:5]{index=5}
 
-    # pixelArea v m² a maska DEMu -> identická footprint/GRID  # :contentReference[oaicite:8]{index=8}
-    px_img = ee.Image.pixelArea().updateMask(ee.Image(img).mask())
+    # TIFF export uses an unmasked DEM with a stable NoData fill
+    dem_for_export = ee_dem_grid.unmask(nodata_value)
 
-    # --- 4) Dočasné soubory ---
+    # 4) Temp files
     if tmp_dir is None:
         tmp_dir = tempfile.mkdtemp()
     dem_path = os.path.join(tmp_dir, dem_filename)
     px_path  = os.path.join(tmp_dir, px_filename)
 
-    # --- 5) Exporty (pixel-perfect grid) ---
-    geemap.ee_export_image(dem_for_export, filename=dem_path, **export_kwargs)  # :contentReference[oaicite:9]{index=9}
-    geemap.ee_export_image(px_img,        filename=px_path,  **export_kwargs)
+    # 5) Exports (pixel-perfect, same grid)
+    geemap.ee_export_image(dem_for_export, filename=dem_path, **export_kwargs)
+    geemap.ee_export_image(ee_px_area_grid, filename=px_path, **export_kwargs)
 
-    # --- 6) Načtení přes rasterio ---
+    # 6) Read with rasterio
     with rasterio.open(dem_path) as src_dem:
         dem_band  = src_dem.read(1).astype("float64")
         transform = src_dem.transform
         out_crs   = src_dem.crs
-        nd_src    = src_dem.nodata  # může být None (ale my jsme NoData zapsali do pixelů)
+        nd_src    = src_dem.nodata
 
     with rasterio.open(px_path) as src_px:
         px = src_px.read(1).astype("float64")
-        # přísná kontrola zarovnání
         if (src_px.transform != transform) or (src_px.crs != out_crs) or \
            (src_px.width != dem_band.shape[1]) or (src_px.height != dem_band.shape[0]):
             raise ValueError("pixel_area is not aligned with DEM (transform/CRS/shape mismatch).")
 
-    # --- 7) Sjednocení NoData (v paměti používej NaN) ---
+    # 7) Harmonize NoData in-memory (NaN)
     nd_value = nd_src if nd_src is not None else float(nodata_value)
     nodata_mask = (dem_band == nd_value) | ~np.isfinite(dem_band)
     dem = dem_band.copy()
@@ -133,94 +141,8 @@ def export_dem_and_area_to_arrays(
         "projection_info": {"crs": crs, "transform": crs_transform},
         "scale_m": scale_m,
         "region_used": region_aligned,
+        "ee_dem_grid": ee_dem_grid,           # <<< aligned ee.Image (masked)
+        "ee_px_area_grid": ee_px_area_grid,   # <<< aligned ee.Image (pixelArea)
         "paths": {"dem": dem_path, "pixel_area": px_path},
         "tmp_dir": tmp_dir,
     }
-
-# import ee
-# import geemap
-# import numpy as np
-# import rasterio
-# import tempfile
-# import os
-
-# def prepare_aligned_dem_and_pixelarea(
-#     dem_image: ee.Image,
-#     region_geom: ee.Geometry,
-#     *,
-#     resample_method: str = "bilinear",
-#     tmp_dir: str | None = None,
-#     dem_filename: str = "dem.tif",
-#     px_filename: str = "pixel_area.tif"
-# ):
-#     """
-#     Export a DEM and pixel-area from Earth Engine on an identical, pixel-locked grid,
-#     read them back with rasterio, and return arrays + metadata ready for processing.
-
-#     Returns dict with:
-#         dem            : 2D float32 ndarray (NaN for NoData)
-#         pixel_area_m2  : 2D float32 ndarray (m^2 per pixel; masked to DEM footprint)
-#         transform      : affine.Affine
-#         crs            : rasterio CRS
-#         nodata_mask    : 2D bool ndarray (True where NoData)
-#         paths          : dict with local file paths
-#         tmp_dir        : temp directory used
-#     """
-#     # 0) Temp dir
-#     if tmp_dir is None:
-#         tmp_dir = tempfile.mkdtemp()
-
-#     dem_path = os.path.join(tmp_dir, dem_filename)
-#     px_path  = os.path.join(tmp_dir, px_filename)
-
-#     # 1) Build export kwargs from the DEM projection
-#     proj_info = dem_image.projection().getInfo()
-#     crs = proj_info["crs"]
-#     crs_transform = proj_info.get("transform")
-
-#     export_kwargs = {
-#         "region": region_geom,
-#         "file_per_band": False,
-#         "crs": crs,
-#     }
-#     if crs_transform:
-#         export_kwargs["crs_transform"] = crs_transform
-#     else:
-#         # Fallback: use nominal scale if no explicit transform is present
-#         scale = dem_image.projection().nominalScale().getInfo()
-#         export_kwargs["scale"] = float(scale)
-
-#     # 2) Prepare images for export
-#     dem_to_export = dem_image.resample(resample_method).toFloat().clip(region_geom)
-#     px_img = ee.Image.pixelArea().updateMask(dem_image.mask())  # align footprint to DEM
-
-#     # 3) Exports (pixel-perfect aligned by crs+crs_transform or by crs+scale)
-#     geemap.ee_export_image(dem_to_export, filename=dem_path, **export_kwargs)
-#     geemap.ee_export_image(px_img,        filename=px_path,  **export_kwargs)
-
-#     # 4) Read back with rasterio
-#     with rasterio.open(dem_path) as src:
-#         dem_ma   = src.read(1, masked=True).astype("float32")  # MaskedArray (NoData preserved)
-#         transform = src.transform
-#         out_crs   = src.crs
-
-#     # unify to NaN for computations
-#     dem = dem_ma.filled(np.nan).astype("float32")
-#     nodata_mask = ~np.isfinite(dem)
-
-#     with rasterio.open(px_path) as src_px:
-#         px = src_px.read(1).astype("float32")
-#         # strict alignment checks
-#         if (src_px.transform != transform) or (src_px.crs != out_crs) \
-#            or (src_px.width != dem.shape[1]) or (src_px.height != dem.shape[0]):
-#             raise ValueError("pixel_area is not aligned with DEM (transform/CRS/shape mismatch).")
-
-#     return {
-#         "dem": dem,
-#         "pixel_area_m2": px,
-#         "transform": transform,
-#         "crs": out_crs,
-#         "nodata_mask": nodata_mask,
-#         "paths": {"dem": dem_path, "pixel_area": px_path},
-#         "tmp_dir": tmp_dir,
-#     }
