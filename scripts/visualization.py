@@ -18,61 +18,61 @@ def visualize_map(layers):
     
     return Map
 
-# def vis_2sigma(image, band, region, scale, k=2.0, palette=None, clamp_to_pct=None):
-#     """
-#     Build visualization params for Map.addLayer() using a μ ± k·σ stretch.
+def vis_2sigma(image, band, region, scale, k=2.0, palette=None, clamp_to_pct=None):
+    """
+    Build visualization params for Map.addLayer() using a μ ± k·σ stretch.
 
-#     Parameters
-#     ----------
-#     image : ee.Image
-#         Source image.
-#     band : str
-#         Band name to visualize.
-#     region : ee.Geometry
-#         Region for statistics (masked pixels are ignored).
-#     scale : float
-#         Pixel scale (meters) for reduceRegion.
-#     k : float, optional
-#         Sigma multiplier; default 2.0.
-#     palette : list[str] | None
-#         Optional color palette for visualization.
-#     clamp_to_pct : tuple[int, int] | None
-#         Optional percentile clamp (e.g., (2, 98)) to make the stretch more robust.
+    Parameters
+    ----------
+    image : ee.Image
+        Source image.
+    band : str
+        Band name to visualize.
+    region : ee.Geometry
+        Region for statistics (masked pixels are ignored).
+    scale : float
+        Pixel scale (meters) for reduceRegion.
+    k : float, optional
+        Sigma multiplier; default 2.0.
+    palette : list[str] | None
+        Optional color palette for visualization.
+    clamp_to_pct : tuple[int, int] | None
+        Optional percentile clamp (e.g., (2, 98)) to make the stretch more robust.
 
-#     Returns
-#     -------
-#     dict
-#         Dictionary with 'bands', 'min', 'max' (and 'palette' if provided) for Map.addLayer().
-#     """
-#     img = image.select([band])
+    Returns
+    -------
+    dict
+        Dictionary with 'bands', 'min', 'max' (and 'palette' if provided) for Map.addLayer().
+    """
+    img = image.select([band])
 
-#     # Mean and standard deviation over the region (masked pixels are ignored)
-#     stats = img.reduceRegion(
-#         reducer=ee.Reducer.mean().combine(ee.Reducer.stdDev(), sharedInputs=True),
-#         geometry=region, scale=scale, bestEffort=True, maxPixels=1e13, tileScale=4
-#     )
-#     mu  = ee.Number(stats.get(f"{band}_mean"))
-#     sig = ee.Number(stats.get(f"{band}_stdDev"))
+    # Mean and standard deviation over the region (masked pixels are ignored)
+    stats = img.reduceRegion(
+        reducer=ee.Reducer.mean().combine(ee.Reducer.stdDev(), sharedInputs=True),
+        geometry=region, scale=scale, bestEffort=True, maxPixels=1e13, tileScale=4
+    )
+    mu  = ee.Number(stats.get(f"{band}_mean"))
+    sig = ee.Number(stats.get(f"{band}_stdDev"))
 
-#     vmin = mu.subtract(sig.multiply(k))
-#     vmax = mu.add(sig.multiply(k))
+    vmin = mu.subtract(sig.multiply(k))
+    vmax = mu.add(sig.multiply(k))
 
-#     # Optionally clamp by percentiles for a more robust stretch
-#     if clamp_to_pct is not None:
-#         lo, hi = clamp_to_pct
-#         p = img.reduceRegion(
-#             reducer=ee.Reducer.percentile([lo, hi]),
-#             geometry=region, scale=scale, bestEffort=True, maxPixels=1e13, tileScale=4
-#         )
-#         pmin = ee.Number(p.get(f"{band}_p{lo}"))
-#         pmax = ee.Number(p.get(f"{band}_p{hi}"))
-#         vmin = vmin.max(pmin)
-#         vmax = vmax.min(pmax)
+    # Optionally clamp by percentiles for a more robust stretch
+    if clamp_to_pct is not None:
+        lo, hi = clamp_to_pct
+        p = img.reduceRegion(
+            reducer=ee.Reducer.percentile([lo, hi]),
+            geometry=region, scale=scale, bestEffort=True, maxPixels=1e13, tileScale=4
+        )
+        pmin = ee.Number(p.get(f"{band}_p{lo}"))
+        pmax = ee.Number(p.get(f"{band}_p{hi}"))
+        vmin = vmin.max(pmin)
+        vmax = vmax.min(pmax)
 
-#     params = {"bands": [band], "min": vmin.getInfo(), "max": vmax.getInfo()}
-#     if palette:
-#         params["palette"] = palette
-#     return params
+    params = {"bands": [band], "min": vmin.getInfo(), "max": vmax.getInfo()}
+    if palette:
+        params["palette"] = palette
+    return params
 
 def vis_2sigma_safe(image, band, region, scale, k=2.0, palette=None, clamp_to_pct=None):
     """
@@ -125,3 +125,4 @@ def vis_2sigma_safe(image, band, region, scale, k=2.0, palette=None, clamp_to_pc
     if palette:
         params["palette"] = palette
     return params
+
