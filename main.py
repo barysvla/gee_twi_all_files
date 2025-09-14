@@ -1,4 +1,3 @@
-# main.py
 import ee
 import geemap
 import numpy as np
@@ -139,14 +138,17 @@ def run_pipeline(
         raise ValueError(f"Unsupported flow_method: {flow_method}")
 
     # --- Flow accumulation ---
-    # Example: accumulation in number of cells using Quinn 1991 (matches current default)
-    acc_cells = compute_flow_accumulation_qin_2007(
-        flow_direction, nodata_mask=nodata_mask, out='cells'
+    # Example: accumulation in number of cells using Qin 2007 (matches current default)
+    # acc_cells = compute_flow_accumulation_qin_2007(
+    #     flow_direction, nodata_mask=nodata_mask, out='cells'
+    # )
+    acc_km2 = compute_flow_accumulation_qin_2007(
+        flow_direction, pixel_area_m2=px_area, nodata_mask=nodata_mask, out='km2'
     )
 
     # --- Push numpy array back to EE as GeoTIFF-backed ee.Image ---
     dict_acc = push_array_to_ee_geotiff(
-        acc_cells,
+        acc_km2,
         transform=transform,
         crs=out_crs,
         nodata_mask=nodata_mask,
