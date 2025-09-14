@@ -1,3 +1,4 @@
+# main.py
 import ee
 import geemap
 import numpy as np
@@ -30,28 +31,35 @@ from scripts.visualization import visualize_map, vis_2sigma
 
 def run_pipeline(
     project_id: str = None,
-    geometry: ee.Geometry = None,
-    dem_source: str = "FABDEM",   # options: FABDEM, GLO30, AW3D30, SRTMGL1_003, NASADEM_HGT, ASTER_GDEM, CGIAR_SRTM90, MERIT_Hydro
-    flow_method: str = "quinn_1991",  # options: quinn_1991, sfd_inf, md_infinity, qin_2007
+    geometry: ee.Geometry = None,                # ORIGINAL, UNBUFFERED ROI (for slope, TWI, clipping)
+    accum_geometry: ee.Geometry = None,          # BUFFERED ROI FOR ACCUMULATION (optional; falls back to geometry)
+    dem_source: str = "FABDEM",
+    flow_method: str = "quinn_1991",
 ) -> dict:
     """
-    Compute DEM conditioning, flow direction/accumulation, slope, and TWI; return key outputs.
-
+    Compute DEM conditioning, flow direction/accumulation (on buffered ROI), slope and TWI (on unbuffered ROI).
     Returns:
         dict with:
-            - ee_flow_accumulation (ee.Image)
-            - geometry (ee.Geometry)
-            - scale (ee.Number)
-            - twi (ee.Image)
-            - map (geemap.Map)
+            - ee_flow_accumulation        (ee.Image)  # clipped to unbuffered ROI
+            - ee_flow_accumulation_full   (ee.Image)  # full accumulation over buffered ROI
+            - geometry                    (ee.Geometry)        # unbuffered ROI
+            - geometry_accum              (ee.Geometry)        # buffered ROI actually used for accumulation
+            - scale                       (ee.Number)
+            - slope                       (ee.Image)          # clipped to unbuffered ROI
+            - twi                         (ee.Image)          # clipped to unbuffered ROI
+            - map                         (geemap.Map)
     """
     # --- Initialize Earth Engine ---
     ee.Initialize(project=project_id)
 
-    # --- Region of interest ---
+    # --- Regions of interest ---
     if geometry is None:
-        # Default rectangle: Prague West area
-        geometry = ee.Geometry.Rectangle([14.2, 50.0, 14.6, 50.2])
+    # Fail fast: the caller must pass a valid ee.Geometry; do not fall back to defaults
+        raise ValueError("Missing required parameter: geometry")
+
+    # Use the same ROI for accumulation if no separate (buffered) geometry was provided
+    if accum_geometry is None:
+        accum_geometry = geometry  # default: no buffer
 
     # --- DEM source selection ---
     if dem_source == "FABDEM":
@@ -73,10 +81,10 @@ def run_pipeline(
     else:
         raise ValueError(f"Unsupported dem_source: {dem_source}")
 
-    # --- Export DEM to numpy grid (server→client bridge) ---
+    # --- Export DEM to numpy grid over the ACCUMULATION geometry (buffered) ---
     grid = export_dem_and_area_to_arrays(
         src=dem_raw,
-        region_geom=geometry,
+        region_geom=accum_geometry,      # compute grids over buffered extent to reduce boundary effects
         band=None,
         resample_method="bilinear",
         nodata_value=-9999.0,
@@ -84,7 +92,7 @@ def run_pipeline(
     )
 
     dem_r       = grid["dem"]
-    ee_dem_grid = grid["ee_dem_grid"]
+    ee_dem_grid = grid["ee_dem_grid"]             # DEM over buffered extent (server-side image)
     px_area     = grid["pixel_area_m2"]
     transform   = grid["transform"]
     nodata_mask = grid["nodata_mask"]
@@ -93,7 +101,7 @@ def run_pipeline(
     scale = ee.Number(ee_dem_grid.projection().nominalScale())
     print("nominalScale [m]:", scale.getInfo())
 
-    # --- Hydrologic conditioning ---
+    # --- Hydrologic conditioning (client-side arrays) ---
     dem_filled, depth = priority_flood_fill(
         dem_r, seed_internal_nodata_as_outlet=True, return_fill_depth=True
     )
@@ -109,7 +117,7 @@ def run_pipeline(
         include_equal_ties=True,
     )
 
-    # --- Flow direction ---
+    # --- Flow direction (on buffered grid) ---
     if flow_method == "sfd_inf":
         flow_direction = compute_flow_direction_sfd_inf(
             dem_resolved, transform, nodata_mask=nodata_mask
@@ -137,16 +145,16 @@ def run_pipeline(
     else:
         raise ValueError(f"Unsupported flow_method: {flow_method}")
 
-    # --- Flow accumulation ---
-    # Example: accumulation in number of cells using Qin 2007 (matches current default)
+    # --- Flow accumulation on buffered domain ---
+    # Example: Qin 2007; adjust to match selected flow_method if you have variants
     acc_cells = compute_flow_accumulation_qin_2007(
-        flow_direction, nodata_mask=nodata_mask, out='cells'
+        flow_direction, nodata_mask=nodata_mask, out="cells"
     )
     acc_km2 = compute_flow_accumulation_qin_2007(
-        flow_direction, pixel_area_m2=px_area, nodata_mask=nodata_mask, out='km2'
+        flow_direction, pixel_area_m2=px_area, nodata_mask=nodata_mask, out="km2"
     )
 
-    # --- Push numpy array back to EE as GeoTIFF-backed ee.Image ---
+    # --- Push numpy arrays back to EE (full buffered extent) ---
     dict_acc_cells = push_array_to_ee_geotiff(
         acc_cells,
         transform=transform,
@@ -169,14 +177,19 @@ def run_pipeline(
         tmp_dir=grid.get("tmp_dir", None),
         nodata_value=np.nan,
     )
-    ee_flow_accumulation_cells = dict_acc_cells["image"]
-    ee_flow_accumulation = dict_acc["image"]
+    ee_flow_accumulation_cells_full = dict_acc_cells["image"]
+    ee_flow_accumulation_full = dict_acc["image"]
 
-    # --- Slope & TWI in EE ---
-    slope = compute_slope(ee_dem_grid)
-    twi = compute_twi(ee_flow_accumulation, slope)
+    # --- Clip accumulation to the ORIGINAL (unbuffered) ROI for outputs/visuals ---
+    ee_flow_accumulation_cells = ee_flow_accumulation_cells_full.clip(geometry)
+    ee_flow_accumulation = ee_flow_accumulation_full.clip(geometry)
 
-    # --- Optional CTI reference layer (Hydrography90m) ---
+    # --- Slope & TWI on the ORIGINAL ROI ---
+    slope_full = compute_slope(ee_dem_grid)       # slope from DEM over buffered grid
+    slope = slope_full.clip(geometry)             # restrict to original ROI
+    twi = compute_twi(ee_flow_accumulation, slope).clip(geometry)
+
+    # --- Optional CTI reference layer (Hydrography90m; scaled by 1e8) ---
     cti_ic = ee.ImageCollection("projects/sat-io/open-datasets/HYDROGRAPHY90/flow_index/cti")
     cti = cti_ic.mosaic().toFloat().divide(ee.Number(1e8)).rename("CTI").clip(geometry)
 
@@ -199,21 +212,23 @@ def run_pipeline(
     )
 
     Map = visualize_map([
-        (ee_flow_accumulation_cells, vis_acc_cells, "Flow accumulation (cells)"),
-        (ee_flow_accumulation, vis_acc, "Flow accumulation (km2)"),
+        (ee_flow_accumulation_cells, vis_acc_cells, "Flow accumulation (cells) — clipped"),
+        (ee_flow_accumulation, vis_acc, "Flow accumulation (km²) — clipped"),
         (cti, vis_cti, "CTI (Hydrography90m)"),
         (twi, vis_twi, "TWI (2σ)"),
     ])
     Map.centerObject(geometry, 12)
 
     return {
-        "ee_flow_accumulation": ee_flow_accumulation,
-        "geometry": geometry,
+        "ee_flow_accumulation": ee_flow_accumulation,                 # clipped
+        "ee_flow_accumulation_full": ee_flow_accumulation_full,       # buffered extent
+        "geometry": geometry,                                         # unbuffered ROI
+        "geometry_accum": accum_geometry,                             # buffered ROI
         "scale": scale,
+        "slope": slope,
         "twi": twi,
         "map": Map,
     }
 
 if __name__ == "__main__":
-    # Run only when executed as a script, not when imported.
     _ = run_pipeline()
