@@ -139,14 +139,25 @@ def run_pipeline(
 
     # --- Flow accumulation ---
     # Example: accumulation in number of cells using Qin 2007 (matches current default)
-    # acc_cells = compute_flow_accumulation_qin_2007(
-    #     flow_direction, nodata_mask=nodata_mask, out='cells'
-    # )
+    acc_cells = compute_flow_accumulation_qin_2007(
+        flow_direction, nodata_mask=nodata_mask, out='cells'
+    )
     acc_km2 = compute_flow_accumulation_qin_2007(
         flow_direction, pixel_area_m2=px_area, nodata_mask=nodata_mask, out='km2'
     )
 
     # --- Push numpy array back to EE as GeoTIFF-backed ee.Image ---
+    dict_acc_cells = push_array_to_ee_geotiff(
+        acc_cells,
+        transform=transform,
+        crs=out_crs,
+        nodata_mask=nodata_mask,
+        bucket_name=f"{project_id}-ee-uploads",
+        project_id=project_id,
+        band_name="flow_accumulation_cells",
+        tmp_dir=grid.get("tmp_dir", None),
+        nodata_value=np.nan,
+    )
     dict_acc = push_array_to_ee_geotiff(
         acc_km2,
         transform=transform,
@@ -154,10 +165,11 @@ def run_pipeline(
         nodata_mask=nodata_mask,
         bucket_name=f"{project_id}-ee-uploads",
         project_id=project_id,
-        band_name="flow_accumulation",
+        band_name="flow_accumulation_km2",
         tmp_dir=grid.get("tmp_dir", None),
         nodata_value=np.nan,
     )
+    ee_flow_accumulation_cells = dict_acc_cells["image"]
     ee_flow_accumulation = dict_acc["image"]
 
     # --- Slope & TWI in EE ---
@@ -178,12 +190,17 @@ def run_pipeline(
         palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
     )
     vis_acc = vis_2sigma(
-        ee_flow_accumulation, "flow_accumulation", geometry, scale, k=2.0,
+        ee_flow_accumulation, "flow_accumulation_km2", geometry, scale, k=2.0,
+        palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
+    )
+    vis_acc_cells = vis_2sigma(
+        ee_flow_accumulation_cells, "flow_accumulation_cells", geometry, scale, k=2.0,
         palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
     )
 
     Map = visualize_map([
-        (ee_flow_accumulation, vis_acc, "Flow accumulation"),
+        (ee_flow_accumulation_cells, vis_acc_cells, "Flow accumulation (cells)"),
+        (ee_flow_accumulation, vis_acc, "Flow accumulation (km2)"),
         (cti, vis_cti, "CTI (Hydrography90m)"),
         (twi, vis_twi, "TWI (2σ)"),
     ])
