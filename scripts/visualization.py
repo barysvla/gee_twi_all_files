@@ -7,7 +7,8 @@ def visualize_map(layers):
     Vytvoření interaktivní mapy s vrstevnicemi.
     :param layers: Seznam tuple vrstvy a jejich vizualizačních parametrů.
     """
-    Map = geemap.Map()
+    Map = geemap.Map(basemap="Esri.WorldImagery")
+    Map.add_basemap("Esri.WorldTopoMap")
     
     for layer in layers:
         image, vis_params, name = layer
@@ -125,4 +126,3 @@ def vis_2sigma_safe(image, band, region, scale, k=2.0, palette=None, clamp_to_pc
     if palette:
         params["palette"] = palette
     return params
-
