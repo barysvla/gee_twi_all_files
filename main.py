@@ -166,15 +166,15 @@ def run_pipeline(
 
     # --- Optional CTI reference layer (Hydrography90m) ---
     cti_ic = ee.ImageCollection("projects/sat-io/open-datasets/HYDROGRAPHY90/flow_index/cti")
-    cti = cti_ic.mosaic().toFloat().clip(geometry)
+    cti = cti_ic.mosaic().toFloat().divide(ee.Number(1e8)).rename("CTI").clip(geometry)
 
     # --- Visualization (geemap.Map) ---
     vis_twi = vis_2sigma(
-        twi, "TWI_scaled", geometry, scale, k=2.0,
+        twi, "TWI", geometry, scale, k=2.0,
         palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
     )
     vis_cti = vis_2sigma(
-        cti, "b1", geometry, scale, k=2.0,
+        cti, "CTI", geometry, scale, k=2.0,
         palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
     )
     vis_acc = vis_2sigma(
