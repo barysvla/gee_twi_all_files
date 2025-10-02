@@ -212,10 +212,10 @@ def run_pipeline(
     )
 
     Map = visualize_map([
-        (ee_flow_accumulation_cells, vis_acc_cells, "Flow accumulation (cells) — clipped"),
-        (ee_flow_accumulation, vis_acc, "Flow accumulation (km²) — clipped"),
-        (cti, vis_cti, "CTI (Hydrography90m)"),
-        (twi, vis_twi, "TWI (2σ)"),
+        (ee_flow_accumulation_cells, vis_acc_cells, "Flow accumulation (cells)"),
+        (ee_flow_accumulation, vis_acc, "Flow accumulation (km²)"),
+        (cti, vis_cti, "CTI - reference (Hydrography90m)"),
+        (twi, vis_twi, "TWI"),
     ])
     Map.centerObject(geometry, 12)
 
