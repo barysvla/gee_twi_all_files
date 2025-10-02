@@ -4,7 +4,7 @@ from IPython.display import display
 
 def visualize_map(layers):
     """
-    Vytvoření interaktivní mapy s vrstevnicemi.
+    Vytvoření interaktivní mapy.
     :param layers: Seznam tuple vrstvy a jejich vizualizačních parametrů.
     """
     Map = geemap.Map(basemap="Esri.WorldImagery")
@@ -126,3 +126,4 @@ def vis_2sigma_safe(image, band, region, scale, k=2.0, palette=None, clamp_to_pc
     if palette:
         params["palette"] = palette
     return params
+
