@@ -7,7 +7,7 @@ import os
 
 from scripts.io_grid import export_dem_and_area_to_arrays
 from scripts.save_array_as_geotiff import save_array_as_geotiff
-from scripts.slope_tiff import compute_slope_numpy_from_ee, ee_image_to_numpy
+from scripts.slope_tiff import slope_ee_to_numpy_on_grid
 from scripts.twi_np import compute_twi_numpy
 
 from scripts.fill_depressions import priority_flood_fill
@@ -240,20 +240,17 @@ def run_pipeline(
 
     else:
         # Local mode: compute slope & TWI in numpy, save TIFFs
+        acc_km2_clipped = acc_km2.clip(geometry)
 
         # Slope via EE → numpy
-        slope_np = compute_slope_numpy_from_ee(
-            ee_dem_grid,
-            region=accum_geometry,
-            crs=out_crs,
-            crs_transform=transform,
-            scale=None
-        )
+        slope_ee = ee.Terrain.slope(ee_dem_grid)
+        slope_np_full = slope_ee_to_numpy_on_grid(grid, ee_dem_grid)
+        slope_np = slope_np_full.clip(geometry)
 
         # Compute twi numpy
         # Here we assume acc_km2 is area (m^2). If not, use acc_cells and cell area = px_area.
-        twi_np = compute_twi_numpy(
-            acc_np=acc_km2,
+        twi_np_full = compute_twi_numpy(
+            acc_np=acc_km2_clipped,
             slope_deg_np=slope_np,
             acc_is_area=True,
             cell_area=None,
@@ -262,29 +259,31 @@ def run_pipeline(
             out_dtype="float32"
         )
 
+        twi_np = twi_np_full.clip(geometry)
+
         # Save arrays to GeoTIFFs
         geotiff_acc_km2 = save_array_as_geotiff(
-            acc_km2, transform, out_crs, nodata_mask,
-            filename="flow_accumulation_km2_local.tif"
+            acc_km2_clipped, transform, out_crs, nodata_mask,
+            filename="flow_accumulation_km2.tif"
         )
         geotiff_slope = save_array_as_geotiff(
             slope_np, transform, out_crs, nodata_mask,
-            filename="slope_local.tif"
+            filename="slope.tif"
         )
         geotiff_twi = save_array_as_geotiff(
             twi_np, transform, out_crs, nodata_mask,
-            filename="twi_local.tif"
+            filename="twi.tif"
         )
 
-        # If running in Colab, offer downloads
-        try:
-            files.download(geotiff_twi)
-        except Exception:
-            pass
+        # # If running in Colab, offer downloads
+        # try:
+        #     files.download(geotiff_twi)
+        # except Exception:
+        #     pass
 
         return {
             "mode": "local",
-            "acc_km2_array": acc_km2,
+            "acc_km2_array": acc_km2_clipped,
             "slope_array": slope_np,
             "twi_array": twi_np,
             "geotiff_acc_km2_path": geotiff_acc_km2,
