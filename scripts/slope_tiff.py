@@ -183,8 +183,3 @@ def compute_slope_numpy_from_ee(
         dtype="float32"
     )
     return slope_np
-
-
-
-
-
