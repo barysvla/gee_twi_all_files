@@ -91,95 +91,77 @@ import numpy as np
 import rasterio
 import tempfile
 import os
+import time
 import shutil
 
-def ee_image_to_numpy(
-    img: ee.Image,
-    region: ee.Geometry,
-    *,
-    crs=None,
-    crs_transform=None,
-    scale=None,
-    bands: list = None,
-    dtype: str = "float32"
-) -> np.ndarray:
+def slope_ee_to_numpy_on_grid(grid: dict, ee_dem_grid: ee.Image) -> np.ndarray:
     """
-    Export an EE Image (e.g. slope) to GeoTIFF via geemap, then read as numpy array.
+    Convert EE slope (computed from ee_dem_grid) to a NumPy array on the SAME grid as DEM.
+    Uses primitive CRS string + transform list from `grid["projection_info"]`.
 
-    Parameters:
-      - img: ee.Image to export
-      - region: ee.Geometry region to export
-      - crs, crs_transform: optional specification to lock to a grid
-      - scale: fallback scale if crs_transform not provided
-      - bands: list of band names to extract (if None, export all bands)
-      - dtype: output numpy dtype
+    Steps:
+      1) Read CRS (string) and transform (list) + aligned region from grid.
+      2) Build slope image from ee_dem_grid on the same EE grid (float).
+      3) Export slope GeoTIFF using the same (crs, crsTransform) as DEM export.
+      4) Read TIFF with rasterio -> NumPy, convert nodata to NaN, enforce DEM nodata mask.
 
     Returns:
-      - numpy array of shape (bands, rows, cols) if multiple bands, or (rows, cols) if single band
+      - slope_np: 2D numpy array (float32) aligned with DEM grid (same shape as grid["dem"])
     """
+    # 1) Get primitive projection info from grid (STRING CRS + LIST transform)
+    proj_info = grid["projection_info"]                # {'crs': 'EPSG:xxxx' or WKT string, 'transform': [a,b,c,d,e,f]}
+    crs_str = proj_info["crs"]                         # STRING (do NOT pass rasterio.CRS)
+    crs_transform_list = proj_info["transform"]        # LIST
+    region_aligned = grid["region_used"]               # ee.Geometry aligned to DEM grid
 
-    # Rename/select bands if needed
-    if bands is not None:
-        img = img.select(bands)
+    # 2) Build slope image from the already aligned ee_dem_grid
+    slope_img = ee.Terrain.slope(ee_dem_grid).toFloat().rename("slope")
 
-    # Use geemap to export as GeoTIFF
+    # 3) Export slope GeoTIFF using same (crs, crsTransform)
     tmp_dir = tempfile.mkdtemp()
-    fname = "tmp_export.tif"
-    path = os.path.join(tmp_dir, fname)
+    slope_tif = os.path.join(tmp_dir, "slope.tif")
 
-    export_kwargs = {"region": region}
-    if crs_transform is not None and crs is not None:
-        export_kwargs["crs"] = crs
-        export_kwargs["crs_transform"] = crs_transform
+    export_kwargs = {
+        "region": region_aligned,
+        "file_per_band": False,
+        "crs": crs_str,
+    }
+    if crs_transform_list is not None:
+        export_kwargs["crs_transform"] = crs_transform_list
     else:
-        if scale is None:
-            raise ValueError("Either (crs + crs_transform) or scale must be provided")
-        export_kwargs["scale"] = scale
+        # fallback: use the pixel scale captured in grid (meters per pixel)
+        export_kwargs["scale"] = float(grid["scale_m"])
 
-    # Use geemap to export
-    geemap.ee_export_image(img, filename=path, **export_kwargs)
+    geemap.ee_export_image(slope_img, filename=slope_tif, **export_kwargs)
 
-    # Read the exported TIFF
+    # Wait briefly to ensure the file appears
+    for _ in range(10):
+        if os.path.exists(slope_tif):
+            break
+        time.sleep(0.5)
+    if not os.path.exists(slope_tif):
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise RuntimeError(f"Export failed, file not created: {slope_tif}")
+
+    # 4) Read back as NumPy, convert nodata -> NaN, enforce DEM nodata mask
     try:
-        with rasterio.open(path) as src:
-            data = src.read().astype(dtype)  # shape: (bands, rows, cols)
-            # Convert nodata to nan
-            nodata = src.nodata
-            if nodata is not None:
-                # for each band
-                mask = np.isclose(data, nodata)
-                data = np.where(mask, np.nan, data)
+        with rasterio.open(slope_tif) as src:
+            slope_np = src.read(1).astype("float32")
+            nodata_val = src.nodata
     finally:
+        # clean up temp dir
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    # If one band only, squeeze out the first dimension
-    if data.shape[0] == 1:
-        data = data[0]
+    if nodata_val is not None:
+        slope_np = np.where(np.isclose(slope_np, nodata_val), np.nan, slope_np)
 
-    return data
+    # Enforce DEM nodata mask from grid
+    nodata_mask = grid["nodata_mask"]
+    slope_np = np.where(nodata_mask, np.nan, slope_np)
 
+    # Sanity check: shapes must match DEM array
+    dem_r = grid["dem"]
+    if slope_np.shape != dem_r.shape:
+        raise ValueError(f"Grid mismatch: slope {slope_np.shape} vs DEM {dem_r.shape}")
 
-def compute_slope_numpy_from_ee(
-    dem_img: ee.Image,
-    region: ee.Geometry,
-    *,
-    crs=None,
-    crs_transform=None,
-    scale=None
-) -> np.ndarray:
-    """
-    Compute slope in EE, export to numpy, return slope in degrees.
-
-    Returns 2D numpy array (rows, cols).
-    """
-    slope_img = ee.Terrain.slope(dem_img).rename("slope")
-    slope_np = ee_image_to_numpy(
-        slope_img,
-        region,
-        crs=crs,
-        crs_transform=crs_transform,
-        scale=scale,
-        bands=["slope"],
-        dtype="float32"
-    )
     return slope_np
