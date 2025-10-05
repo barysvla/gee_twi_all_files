@@ -130,14 +130,14 @@ def run_pipeline(
         flow_direction = compute_flow_direction_dz_mfd(
             dem_resolved, p=1.6, nodata_mask=nodata_mask
         )
-    elif flow_method == "quinn_cit":
-        flow_direction = compute_flow_direction_quinn_cit(
-            dem_resolved, transform, p=1.0, nodata_mask=nodata_mask
-        )
-    elif flow_method == "quinn_1991":
-        flow_direction = compute_flow_direction_quinn_1991(
-            dem_resolved, transform, p=1.0, nodata_mask=nodata_mask
-        )
+    # elif flow_method == "quinn_cit":
+    #     flow_direction = compute_flow_direction_quinn_cit(
+    #         dem_resolved, transform, p=1.0, nodata_mask=nodata_mask
+    #     )
+    # elif flow_method == "quinn_1991":
+    #     flow_direction = compute_flow_direction_quinn_1991(
+    #         dem_resolved, transform, p=1.0, nodata_mask=nodata_mask
+    #     )
     elif flow_method == "md_infinity":
         flow_direction = compute_flow_direction_md_infinity(
             dem_resolved, transform, nodata_mask=nodata_mask
