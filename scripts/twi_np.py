@@ -48,8 +48,8 @@ def compute_twi_numpy(
     a_safe = np.where(np.isfinite(a) & (a > 0), a, 1.0)
     twi = np.log(a_safe / tan_beta).astype(np.float64)
 
-    twi_scaled = (twi * 1e8).astype(np.int32)
-    return  twi_scaled
+    #twi_scaled = (twi * 1e8).astype(np.int32)
+    return  twi
 
 
 import numpy as np
@@ -141,6 +141,7 @@ def compute_twi_numpy_like_ee(
 #     valid = np.isfinite(twi)
 #     twi_scaled[valid] = (twi[valid] * 1e8).astype(np.int32)
 #     return twi_scaled
+
 
 
 
