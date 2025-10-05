@@ -6,6 +6,9 @@ import tempfile
 import os
 
 from scripts.io_grid import export_dem_and_area_to_arrays
+from scripts.save_array_as_geotiff.py import save_array_as_geotiff
+from scripts.slope_tiff.py import compute_slope_numpy_from_ee, ee_image_to_numpy
+from scripts.twi_np.py import compute_twi_numpy
 
 from scripts.fill_depressions import priority_flood_fill
 from scripts.resolve_flats import resolve_flats_barnes_tie
@@ -35,6 +38,7 @@ def run_pipeline(
     accum_geometry: ee.Geometry = None,          # BUFFERED ROI FOR ACCUMULATION (optional; falls back to geometry)
     dem_source: str = "FABDEM",
     flow_method: str = "quinn_1991",
+    use_bucket: bool = False,
 ) -> dict:
     """
     Compute DEM conditioning, flow direction/accumulation (on buffered ROI), slope and TWI (on unbuffered ROI).
