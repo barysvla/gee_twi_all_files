@@ -27,6 +27,7 @@ from scripts.flow_accumulation_md_inf import compute_flow_accumulation_md_infini
 from scripts.flow_accumulation_qin_2007 import compute_flow_accumulation_qin_2007
 
 from scripts.push_to_ee import push_array_to_ee_geotiff
+from scripts.clip_tif import clip_tif_by_geojson
 from scripts.slope import compute_slope
 from scripts.twi import compute_twi
 from scripts.visualization import visualize_map, vis_2sigma
@@ -35,7 +36,7 @@ from google.colab import files
 
 def run_pipeline(
     project_id: str = None,
-    geometry: ee.Geometry = None,                # ORIGINAL, UNBUFFERED ROI (for slope, TWI, clipping)
+    geometry: ee.Geometry = None,                # ORIGINAL, UNBUFFERED ROI (for clipping)
     accum_geometry: ee.Geometry = None,          # BUFFERED ROI FOR ACCUMULATION (optional; falls back to geometry)
     dem_source: str = "FABDEM",
     flow_method: str = "quinn_1991",
@@ -240,17 +241,14 @@ def run_pipeline(
 
     else:
         # Local mode: compute slope & TWI in numpy, save TIFFs
-        acc_km2_clipped = acc_km2.clip(geometry)
-
         # Slope via EE → numpy
         slope_ee = ee.Terrain.slope(ee_dem_grid)
-        slope_np_full = slope_ee_to_numpy_on_grid(grid, ee_dem_grid)
-        slope_np = slope_np_full.clip(geometry)
-
+        slope_np = slope_ee_to_numpy_on_grid(grid, ee_dem_grid)
+      
         # Compute twi numpy
         # Here we assume acc_km2 is area (m^2). If not, use acc_cells and cell area = px_area.
-        twi_np_full = compute_twi_numpy(
-            acc_np=acc_km2_clipped,
+        twi_np = compute_twi_numpy(
+            acc_np=acc_km2,
             slope_deg_np=slope_np,
             acc_is_area=True,
             cell_area=None,
@@ -259,11 +257,9 @@ def run_pipeline(
             out_dtype="float32"
         )
 
-        twi_np = twi_np_full.clip(geometry)
-
         # Save arrays to GeoTIFFs
         geotiff_acc_km2 = save_array_as_geotiff(
-            acc_km2_clipped, transform, out_crs, nodata_mask,
+            acc_km2, transform, out_crs, nodata_mask,
             filename="flow_accumulation_km2.tif"
         )
         geotiff_slope = save_array_as_geotiff(
@@ -275,17 +271,17 @@ def run_pipeline(
             filename="twi.tif"
         )
 
-        # # If running in Colab, offer downloads
-        # try:
-        #     files.download(geotiff_twi)
-        # except Exception:
-        #     pass
+        geometry_wgs84 = geometry.getInfo()          
+
+        acc_km2_clipped = clip_tif_by_geojson(geotiff_acc_km2, geometry_wgs84, "acc_km2_clipped.tif")
+        slope_clipped = clip_tif_by_geojson(geotiff_slope, geometry_wgs84, "slope_clipped.tif")
+        twi_clipped = clip_tif_by_geojson(geotiff_twi, geometry_wgs84, "twi_clipped.tif")
 
         return {
             "mode": "local",
             "acc_km2_array": acc_km2_clipped,
-            "slope_array": slope_np,
-            "twi_array": twi_np,
+            "slope_array": slope_clipped,
+            "twi_array": twi_clipped,
             "geotiff_acc_km2_path": geotiff_acc_km2,
             "geotiff_slope_path": geotiff_slope,
             "geotiff_twi_path": geotiff_twi,
