@@ -30,7 +30,7 @@ from scripts.push_to_ee import push_array_to_ee_geotiff
 from scripts.clip_tif import clip_tif_by_geojson
 from scripts.slope import compute_slope
 from scripts.twi import compute_twi
-from scripts.visualization import visualize_map, vis_2sigma
+from scripts.visualization import visualize_map, visualize_map_leaf, vis_2sigma, vis_2sigma_tif
 
 from google.colab import files
 
