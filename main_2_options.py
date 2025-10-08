@@ -302,6 +302,7 @@ def run_pipeline(
             "transform": transform,
             "crs": out_crs,
             "nodata_mask": nodata_mask,
+            "map": Map,
         }
 
 if __name__ == "__main__":
