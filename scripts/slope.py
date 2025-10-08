@@ -10,7 +10,7 @@ import shutil
 
 def compute_slope(dem):
     """
-    Výpočet sklonu terénu na základě DEM.
+    Computation of terrain slope based on DEM.
     """
     slope = ee.Terrain.slope(dem).rename("Slope")
     
@@ -37,7 +37,7 @@ def slope_ee_to_numpy_on_grid(grid: dict, ee_dem_grid: ee.Image) -> np.ndarray:
     region_aligned = grid["region_used"]               # ee.Geometry aligned to DEM grid
 
     # 2) Build slope image from the already aligned ee_dem_grid
-    slope_img = ee.Terrain.slope(ee_dem_grid).toFloat().rename("slope")
+    slope_img = ee.Terrain.slope(ee_dem_grid).toFloat().rename("Slope")
 
     # 3) Export slope GeoTIFF using same (crs, crsTransform)
     tmp_dir = tempfile.mkdtemp()
