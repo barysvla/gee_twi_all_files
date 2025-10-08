@@ -6,7 +6,8 @@ import os
 
 def clip_tif_by_geojson(input_tif: str,
                         geojson_geom: dict,
-                        output_tif: str) -> str:
+                        output_tif: str,
+                        band_name: str = None) -> str:
     """
     Clip input_tif by geojson_geom. Outside geometry → NaN.
     """
@@ -51,5 +52,6 @@ def clip_tif_by_geojson(input_tif: str,
 
     with rasterio.open(output_tif, "w", **out_meta) as dst:
         dst.write(out_image)
-
+        if band_name:
+            dst.set_band_description(1, band_name)
     return output_tif
