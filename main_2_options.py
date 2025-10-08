@@ -7,7 +7,6 @@ import os
 
 from scripts.io_grid import export_dem_and_area_to_arrays
 from scripts.save_array_as_geotiff import save_array_as_geotiff
-from scripts.slope_tiff import slope_ee_to_numpy_on_grid
 from scripts.twi_np import compute_twi_numpy
 
 from scripts.fill_depressions import priority_flood_fill
@@ -28,7 +27,7 @@ from scripts.flow_accumulation_qin_2007 import compute_flow_accumulation_qin_200
 
 from scripts.push_to_ee import push_array_to_ee_geotiff
 from scripts.clip_tif import clip_tif_by_geojson
-from scripts.slope import compute_slope
+from scripts.slope import compute_slope, slope_ee_to_numpy_on_grid
 from scripts.twi import compute_twi
 from scripts.visualization import visualize_map, visualize_map_leaf, vis_2sigma, vis_2sigma_tif
 
@@ -249,7 +248,6 @@ def run_pipeline(
     else:
         # Local mode: compute slope & TWI in numpy, save TIFFs
         # Slope via EE → numpy
-        slope_ee = ee.Terrain.slope(ee_dem_grid)
         slope_np = slope_ee_to_numpy_on_grid(grid, ee_dem_grid)
         print("✅ Slope computed.")
 
