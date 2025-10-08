@@ -12,6 +12,7 @@ def save_array_as_geotiff(
     dtype: str = None,
     compress: str = "LZW",
     nodata_value: float = np.nan,
+    band_name: str = None,
 ) -> str:
     """
     Save a numpy array to GeoTIFF, preserving georeference, CRS, and nodata mask.
@@ -78,6 +79,8 @@ def save_array_as_geotiff(
     # Write the GeoTIFF
     with rasterio.open(filename, "w", **profile) as dst:
         dst.write(write_arr, 1)
+        if band_name:
+            dst.set_band_description(1, band_name)
         # If nodata_value is NaN, write mask based on nodata_mask
         if np.isnan(nodata_value) and nodata_mask is not None:
             mask = (~nodata_mask).astype("uint8") * 255
