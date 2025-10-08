@@ -1,6 +1,9 @@
 import geemap
 import ee
 from IPython.display import display
+import numpy as np
+import rasterio
+import leafmap.leafmap as leafmap
 
 def visualize_map(layers):
     """
@@ -18,7 +21,57 @@ def visualize_map(layers):
             print(f"⚠ Varování: Vrstva '{name}' není typu ee.Image a nebude zobrazena!")
     
     return Map
-
+    
+def visualize_map_leaf(layers, center=None, zoom=10, basemaps=None):
+    """
+    Create an interactive map using leafmap, similar to geemap version.
+    
+    :param layers: list of tuples (img_or_path, vis_params, name)
+                   img_or_path can be ee.Image or a path to a raster file
+    :param center: optional (lat, lon) to center map initially
+    :param zoom: initial zoom level
+    :param basemaps: optional list of basemap names (strings) to add
+    :return: leafmap.Map instance
+    """
+    # Create base map
+    if center is None:
+        m = leafmap.Map()
+    else:
+        m = leafmap.Map(center=center, zoom=zoom)
+    
+    # Add extra basemaps if given
+    if basemaps:
+        for bm in basemaps:
+            m.add_basemap(bm)
+    
+    # Add each layer
+    for img_or_path, vis_params, name in layers:
+        if isinstance(img_or_path, ee.Image):
+            # Add EE layer
+            m.add_ee_layer(img_or_path, vis_params, name)
+        else:
+            # Treat as local raster
+            cmap = vis_params.get("palette") or vis_params.get("colormap")
+            vmin = vis_params.get("min", None)
+            vmax = vis_params.get("max", None)
+            nodata = vis_params.get("nodata", None)
+            m.add_raster(
+                img_or_path,
+                layer_name=name,
+                colormap=cmap,
+                vmin=vmin,
+                vmax=vmax,
+                nodata=nodata
+            )
+    
+    # Add inspector / click tool if available
+    # try:
+    #     m.add_inspector_gui()
+    # except Exception:
+    #     pass
+    
+    return m
+    
 def vis_2sigma(image, band, region, scale, k=2.0, palette=None, clamp_to_pct=None):
     """
     Build visualization params for Map.addLayer() using a μ ± k·σ stretch.
@@ -127,3 +180,53 @@ def vis_2sigma_safe(image, band, region, scale, k=2.0, palette=None, clamp_to_pc
         params["palette"] = palette
     return params
 
+def vis_2sigma_tif(tif_path: str, clamp_to_pct: tuple[int,int] = None, k: float = 2.0, palette: list[str] = None):
+    """
+    Compute visualization parameters (min, max, palette) for a GeoTIFF using μ ± k·σ stretch.
+    Fallback to percentiles if data are degenerate.
+    
+    :param tif_path: str, path to the GeoTIFF file
+    :param clamp_to_pct: tuple (lo_pct, hi_pct), e.g. (2,98)
+    :param k: float, multiplier for σ (default 2.0)
+    :param palette: list of hex colors (optional)
+    :return: dict with keys: "min", "max", optionally "palette"
+    """
+    with rasterio.open(tif_path) as src:
+        arr = src.read(1).astype(float)
+        nod = src.nodata
+        if nod is not None:
+            arr = np.where(arr == nod, np.nan, arr)
+    
+    # Flatten valid values (finite)
+    valid = arr[np.isfinite(arr)]
+    if valid.size == 0:
+        # No valid data
+        vmin = 0.0
+        vmax = 1.0
+    else:
+        mu = np.nanmean(valid)
+        sigma = np.nanstd(valid)
+        vmin_sigma = mu - k * sigma
+        vmax_sigma = mu + k * sigma
+        
+        # Fallback percentiles
+        if clamp_to_pct is not None:
+            lo, hi = clamp_to_pct
+            lo_val = np.nanpercentile(valid, lo)
+            hi_val = np.nanpercentile(valid, hi)
+            # Clamp the sigma-derived bounds
+            vmin = max(vmin_sigma, lo_val)
+            vmax = min(vmax_sigma, hi_val)
+        else:
+            vmin = vmin_sigma
+            vmax = vmax_sigma
+        
+        # If degenerate (vmin >= vmax), fallback to percentile extremes
+        if vmin >= vmax:
+            vmin = np.nanpercentile(valid, 2)  # or some default
+            vmax = np.nanpercentile(valid, 98)
+    
+    params = {"min": float(vmin), "max": float(vmax)}
+    if palette is not None:
+        params["palette"] = palette
+    return params
