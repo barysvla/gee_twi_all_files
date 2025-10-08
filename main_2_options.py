@@ -105,7 +105,7 @@ def run_pipeline(
     out_crs     = grid["crs"]
 
     scale = ee.Number(ee_dem_grid.projection().nominalScale())
-    print("nominalScale [m]:", scale.getInfo())
+    #print("nominalScale [m]:", scale.getInfo())
 
     # --- Hydrologic conditioning (client-side arrays) ---
     dem_filled, depth = priority_flood_fill(
