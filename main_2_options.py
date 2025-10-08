@@ -105,12 +105,14 @@ def run_pipeline(
     out_crs     = grid["crs"]
 
     scale = ee.Number(ee_dem_grid.projection().nominalScale())
-    #print("nominalScale [m]:", scale.getInfo())
+    # print("nominalScale [m]:", scale.getInfo())
 
     # --- Hydrologic conditioning (client-side arrays) ---
     dem_filled, depth = priority_flood_fill(
         dem_r, seed_internal_nodata_as_outlet=True, return_fill_depth=True
     )
+    print("✅ Fill pits completed.")
+
     dem_resolved, flatmask, labels, stats = resolve_flats_barnes_tie(
         dem_filled,
         nodata=np.nan,
@@ -122,6 +124,7 @@ def run_pipeline(
         force_all_flats=False,
         include_equal_ties=True,
     )
+    print("✅ Flats resolved.")
 
     # --- Flow direction (on buffered grid) ---
     if flow_method == "sfd_inf":
@@ -150,30 +153,32 @@ def run_pipeline(
         )
     else:
         raise ValueError(f"Unsupported flow_method: {flow_method}")
+    print("✅ Flow direction computed.")
 
     # --- Flow accumulation on buffered domain ---
     # Example: Qin 2007; adjust to match selected flow_method if you have variants
-    acc_cells = compute_flow_accumulation_qin_2007(
-        flow_direction, nodata_mask=nodata_mask, out="cells"
-    )
+    # acc_cells = compute_flow_accumulation_qin_2007(
+    #     flow_direction, nodata_mask=nodata_mask, out="cells"
+    # )
     acc_km2 = compute_flow_accumulation_qin_2007(
         flow_direction, pixel_area_m2=px_area, nodata_mask=nodata_mask, out="km2"
     )
+    print("✅ Flow accumulation computed.")
 
     # Branch: cloud mode vs local mode
     if use_bucket:
         # Upload arrays to EE via bucket
-        dict_acc_cells = push_array_to_ee_geotiff(
-            acc_cells,
-            transform=transform,
-            crs=out_crs,
-            nodata_mask=nodata_mask,
-            bucket_name=f"{project_id}-ee-uploads",
-            project_id=project_id,
-            band_name="flow_accumulation_cells",
-            tmp_dir=grid.get("tmp_dir", None),
-            nodata_value=np.nan,
-        )
+        # dict_acc_cells = push_array_to_ee_geotiff(
+        #     acc_cells,
+        #     transform=transform,
+        #     crs=out_crs,
+        #     nodata_mask=nodata_mask,
+        #     bucket_name=f"{project_id}-ee-uploads",
+        #     project_id=project_id,
+        #     band_name="flow_accumulation_cells",
+        #     tmp_dir=grid.get("tmp_dir", None),
+        #     nodata_value=np.nan,
+        # )
         dict_acc = push_array_to_ee_geotiff(
             acc_km2,
             transform=transform,
@@ -185,17 +190,19 @@ def run_pipeline(
             tmp_dir=grid.get("tmp_dir", None),
             nodata_value=np.nan,
         )
-        ee_flow_accumulation_cells_full = dict_acc_cells["image"]
+        # ee_flow_accumulation_cells_full = dict_acc_cells["image"]
         ee_flow_accumulation_full = dict_acc["image"]
 
         # Clip to original ROI
-        ee_flow_accumulation_cells = ee_flow_accumulation_cells_full.clip(geometry)
+        # ee_flow_accumulation_cells = ee_flow_accumulation_cells_full.clip(geometry)
         ee_flow_accumulation = ee_flow_accumulation_full.clip(geometry)
 
         # Slope & TWI via EE
         slope_full = compute_slope(ee_dem_grid)
         slope = slope_full.clip(geometry)
+        print("✅ Slope computed.")
         twi = compute_twi(ee_flow_accumulation, slope).clip(geometry)
+        print("✅ Twi computed.")
 
         # CTI reference
         cti_ic = ee.ImageCollection("projects/sat-io/open-datasets/HYDROGRAPHY90/flow_index/cti")
@@ -214,13 +221,13 @@ def run_pipeline(
             ee_flow_accumulation, "flow_accumulation_km2", geometry, scale, k=2.0,
             palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
         )
-        vis_acc_cells = vis_2sigma(
-            ee_flow_accumulation_cells, "flow_accumulation_cells", geometry, scale, k=2.0,
-            palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
-        )
+        # vis_acc_cells = vis_2sigma(
+        #     ee_flow_accumulation_cells, "flow_accumulation_cells", geometry, scale, k=2.0,
+        #     palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"]
+        # )
 
         Map = visualize_map([
-            (ee_flow_accumulation_cells, vis_acc_cells, "Flow accumulation (cells)"),
+            # (ee_flow_accumulation_cells, vis_acc_cells, "Flow accumulation (cells)"),
             (ee_flow_accumulation, vis_acc, "Flow accumulation (km²)"),
             (cti, vis_cti, "CTI - reference (Hydrography90m)"),
             (twi, vis_twi, "TWI"),
@@ -244,7 +251,8 @@ def run_pipeline(
         # Slope via EE → numpy
         slope_ee = ee.Terrain.slope(ee_dem_grid)
         slope_np = slope_ee_to_numpy_on_grid(grid, ee_dem_grid)
-      
+        print("✅ Slope computed.")
+
         # Compute twi numpy
         # Here we assume acc_km2 is area (m^2). If not, use acc_cells and cell area = px_area.
         twi_np = compute_twi_numpy(
@@ -256,6 +264,7 @@ def run_pipeline(
             nodata_mask=nodata_mask,
             out_dtype="float32"
         )
+        print("✅ Twi computed.")
 
         # Save arrays to GeoTIFFs
         geotiff_acc_km2 = save_array_as_geotiff(
