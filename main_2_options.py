@@ -260,23 +260,37 @@ def run_pipeline(
         # Save arrays to GeoTIFFs
         geotiff_acc_km2 = save_array_as_geotiff(
             acc_km2, transform, out_crs, nodata_mask,
-            filename="flow_accumulation_km2.tif"
+            filename="flow_accumulation_km2.tif", band_name="Flow accumulation (km2)"
         )
         geotiff_slope = save_array_as_geotiff(
             slope_np, transform, out_crs, nodata_mask,
-            filename="slope.tif"
+            filename="slope.tif", band_name="Slope"
         )
         geotiff_twi = save_array_as_geotiff(
             twi_np, transform, out_crs, nodata_mask,
-            filename="twi.tif"
+            filename="twi.tif", band_name="TWI"
         )
 
         geometry_wgs84 = geometry.getInfo()          
 
-        acc_km2_clipped = clip_tif_by_geojson(geotiff_acc_km2, geometry_wgs84, "acc_km2_clipped.tif")
-        slope_clipped = clip_tif_by_geojson(geotiff_slope, geometry_wgs84, "slope_clipped.tif")
-        twi_clipped = clip_tif_by_geojson(geotiff_twi, geometry_wgs84, "twi_clipped.tif")
+        acc_km2_clipped = clip_tif_by_geojson(geotiff_acc_km2, geometry_wgs84, "acc_km2_clipped.tif", band_name="Flow accumulation (km2)")
+        slope_clipped = clip_tif_by_geojson(geotiff_slope, geometry_wgs84, "slope_clipped.tif", band_name="Slope")
+        twi_clipped = clip_tif_by_geojson(geotiff_twi, geometry_wgs84, "twi_clipped.tif", band_name="TWI")
 
+        vis_twi = vis_2sigma_tif(twi_clipped, clamp_to_pct=(2,98), k=2.0,
+                        palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"])
+        vis_slope = vis_2sigma_tif(slope_clipped, clamp_to_pct=(2,98), k=2.0,
+                        palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"])
+        vis_acc = vis_2sigma_tif(acc_km2_clipped, clamp_to_pct=(2,98), k=2.0,
+                        palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"])
+
+        Map = visualize_map_leaf([
+            #(ee_flow_accumulation_cells, vis_acc_cells, "Flow accumulation (cells)"),
+            (acc_km2_clipped, vis_acc, "Flow accumulation (km²)"),
+            # (cti, vis_cti, "CTI - reference (Hydrography90m)"),
+            (twi_clipped, vis_twi, "TWI"),
+        ], basemaps=["Esri.WorldImagery", "Esri.WorldTopoMap"])
+        
         return {
             "mode": "local",
             "acc_km2_array": acc_km2_clipped,
