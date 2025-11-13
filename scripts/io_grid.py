@@ -150,7 +150,7 @@ def export_dem_and_area_to_arrays(
                         f"Reported by Earth Engine: total request size = {reported_total} bytes, "
                         f"limit = {reported_limit} bytes.\n"
                         f"You need to reduce the request by at least "
-                        f"{reported_total - reported_limit} bytes (or lower the resolution/area).\n"
+                        f"{reported_total - reported_limit} bytes (lower the resolution/area).\n"
                     )
                 elif reported_limit is not None:
                     msg += (
@@ -163,7 +163,7 @@ def export_dem_and_area_to_arrays(
                         msg += "Captured Earth Engine / geemap log output:\n" + log_text + "\n"
 
                 msg += (
-                    "Try reducing the region extent, using coarser resolution, or tiling the export."
+                    "Try reducing the region extent, using coarser resolution."
                 )
 
                 raise RuntimeError(msg)
