@@ -89,7 +89,8 @@ def export_dem_and_area_to_arrays(
         def _ee_export(one_img: ee.Image, out_path: str) -> None:
             """
             Export a single-band image to GeoTIFF using geemap.ee_export_image.
-            Raises RuntimeError with a clear message if the file is not created.
+            If the export fails and no file is created, try to parse the Earth Engine
+            error message to extract the reported total request size in bytes.
             """
             export_kwargs = {
                 "region": region_aligned,
@@ -102,50 +103,67 @@ def export_dem_and_area_to_arrays(
             elif scale_m is not None:
                 export_kwargs["scale"] = scale_m
 
-            # Run export quietly if requested
+            # Capture stdout/stderr from geemap so we can inspect EE error messages
+            log_text = ""
             if quiet:
                 sink = io.StringIO()
                 with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
                     geemap.ee_export_image(one_img, filename=out_path, **export_kwargs)
+                log_text = sink.getvalue()
             else:
+                # When quiet=False we do not redirect, so we only see errors on the console
+                # and may not be able to parse them. Still try to run normally.
                 geemap.ee_export_image(one_img, filename=out_path, **export_kwargs)
 
             # If EE export failed, no file will be created
             if not os.path.exists(out_path):
-                approx_pixels = None
-                approx_bytes = None
-                try:
-                    # Area in m²
-                    area = float(region_aligned.area(maxError=1).getInfo())
-                    # Use EE nominal scale in meters for both directions
-                    scale = float(ee.Image(img).projection().nominalScale().getInfo())
-                    approx_pixels = area / (scale * scale)
-                    # Assuming float32 export: 4 bytes per pixel
-                    approx_bytes = approx_pixels * 4.0
-                except Exception:
-                    pass
+                import re
+
+                reported_total = None
+                reported_limit = None
+
+                # Try to parse patterns like:
+                # "Total request size (78765200 bytes) must be less than or equal to 50331648 bytes."
+                m = re.search(
+                    r"Total request size\s*\((\d+)\s*bytes\)\s*must be less than or equal to\s*(\d+)\s*bytes",
+                    log_text,
+                )
+                if m:
+                    reported_total = int(m.group(1))
+                    reported_limit = int(m.group(2))
+                else:
+                    # Fallback: "Total request size must be less than or equal to 50331648 bytes."
+                    m2 = re.search(
+                        r"Total request size\s*must be less than or equal to\s*(\d+)\s*bytes",
+                        log_text,
+                    )
+                    if m2:
+                        reported_limit = int(m2.group(1))
 
                 msg = (
-                    f"Earth Engine export failed: '{out_path}' was not created. "
-                    "A common cause for large downloads is the HTTP response size limit:\n"
-                    "An error occurred while downloading.\n"
-                    "Total request size must be less than or equal to 50331648 bytes.\n"
+                    f"Earth Engine export failed: '{out_path}' was not created.\n"
+                    "A common cause for large downloads is the HTTP response size limit.\n"
                 )
 
-                if approx_pixels is not None:
-                    msg += f"Estimated pixel count at current resolution: {approx_pixels:.2e}.\n"
-                if approx_bytes is not None:
+                if reported_total is not None and reported_limit is not None:
                     msg += (
-                        f"Approximate uncompressed payload size for float32: "
-                        f"{approx_bytes:.0f} bytes.\n"
-                        "If this value is close to or above 50331648 bytes, the download will "
-                        "hit the HTTP size limit.\n"
+                        f"Reported by Earth Engine: total request size = {reported_total} bytes, "
+                        f"limit = {reported_limit} bytes.\n"
+                        f"You need to reduce the request by at least "
+                        f"{reported_total - reported_limit} bytes (or lower the resolution/area).\n"
                     )
+                elif reported_limit is not None:
+                    msg += (
+                        f"Reported by Earth Engine: total request size must be less than or equal "
+                        f"to {reported_limit} bytes.\n"
+                    )
+                else:
+                    # If we could not parse the message, at least attach the captured log
+                    if log_text.strip():
+                        msg += "Captured Earth Engine / geemap log output:\n" + log_text + "\n"
 
                 msg += (
-                    "If the export still fails with a smaller region or coarser resolution, "
-                    "rerun the export with quiet=False to inspect the original Earth Engine "
-                    "error message."
+                    "Try reducing the region extent, using coarser resolution, or tiling the export."
                 )
 
                 raise RuntimeError(msg)
