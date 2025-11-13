@@ -187,7 +187,10 @@ def run_pipeline(
             project_id=project_id,
             band_name="flow_accumulation_km2",
             tmp_dir=grid.get("tmp_dir", None),
-            nodata_value=np.nan,
+            object_prefix="twi_uploads",
+            nodata_value=-9999.0,
+            # dtype="float32",
+            # build_mask_from_nodata=True,
         )
         # ee_flow_accumulation_cells_full = dict_acc_cells["image"]
         ee_flow_accumulation_full = dict_acc["image"]
