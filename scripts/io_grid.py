@@ -1,14 +1,3 @@
-"""
-Export DEM and pixel area from Earth Engine to aligned GeoTIFFs and NumPy arrays,
-without noisy console output by default.
-
-- Accepts ee.ImageCollection / ee.Image / asset-id (str)
-- Aligns region to the DEM grid (optional)
-- Locks CRS + transform for pixel-perfect alignment
-- Exports DEM (with stable NoData fill) and ee.Image.pixelArea() on the same grid
-- Reads both with rasterio into NumPy arrays
-"""
-
 from __future__ import annotations
 
 import io
@@ -37,8 +26,7 @@ def export_dem_and_area_to_arrays(
     quiet: bool = True,                        # suppress prints/logs from geemap / google clients
 ) -> Dict[str, Any]:
     """
-    Build mosaic (if needed), fix projection, align region, export DEM+pixelArea on identical grid,
-    read back as NumPy, and also return aligned ee.Images on the same grid.
+    Export DEM and pixel area from Earth Engine to aligned GeoTIFFs and NumPy arrays.
 
     Returns:
         dict with:
@@ -57,22 +45,12 @@ def export_dem_and_area_to_arrays(
             tmp_dir: temp folder actually used
     """
     # --- Verbosity control ----------------------------------------------------
-    # Reduce client-side logging noise when quiet=True
     previous_levels = {}
     if quiet:
         for name in ("google", "googleapiclient", "geemap"):
             logger = logging.getLogger(name)
             previous_levels[name] = logger.level
             logger.setLevel(logging.ERROR)
-
-    # Utility to run geemap export with stdout/stderr redirection when quiet
-    def _ee_export(img: ee.Image, filename: str, **kwargs) -> None:
-        if quiet:
-            sink = io.StringIO()
-            with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
-                geemap.ee_export_image(img, filename=filename, **kwargs)
-        else:
-            geemap.ee_export_image(img, filename=filename, **kwargs)
 
     try:
         # --- 0) Normalize input to ee.Image with a stable projection ----------
@@ -83,58 +61,111 @@ def export_dem_and_area_to_arrays(
             ic = ee.ImageCollection(src) if isinstance(src, str) else src
             if band is not None:
                 ic = ic.select([band])
-            # Use the first image's projection as seed; mosaic for coverage
             seed = ic.first()
             img = ic.filterBounds(region_geom).mosaic()
 
         proj = ee.Image(seed).projection()
-
-        # Ensure default projection is set to avoid downstream reduceResolution issues
         img = ee.Image(img).setDefaultProjection(proj)
 
         # --- 1) Optionally snap region to the DEM grid ------------------------
         if snap_region_to_grid:
-            # Create a 1-mask in the seed projection and take its geometry/bounds
             mask = ee.Image.constant(1).reproject(proj).clip(region_geom).selfMask()
             g = mask.geometry().transform(proj=proj, maxError=1)
             region_aligned = g.bounds(maxError=1, proj=proj)
         else:
             region_aligned = region_geom
 
-        # --- 2) Export parameters: lock CRS + transform when available --------
+        # --- 2) Export parameters: CRS + transform / scale --------------------
         proj_info = proj.getInfo()
         crs = proj_info["crs"]
         crs_transform = proj_info.get("transform", None)
 
-        export_kwargs = {
-            "region": region_aligned,
-            "file_per_band": False,
-            "crs": crs,
-        }
         scale_m: Optional[float] = None
-        if crs_transform:
-            export_kwargs["crs_transform"] = crs_transform
-        else:
-            # Fall back to nominal scale when explicit transform is absent
+        if crs_transform is None:
+            # No explicit transform from EE → fall back to nominal scale
             scale_m = float(ee.Image(img).projection().nominalScale().getInfo())
-            export_kwargs["scale"] = scale_m
+
+        # Helper: EE export via geemap.ee_export_image -------------------------
+        def _ee_export(one_img: ee.Image, out_path: str) -> None:
+            """
+            Export a single-band image to GeoTIFF using geemap.ee_export_image.
+            Raises RuntimeError with a clear message if the file is not created.
+            """
+            export_kwargs = {
+                "region": region_aligned,
+                "file_per_band": False,
+            }
+
+            if crs_transform is not None:
+                export_kwargs["crs"] = crs
+                export_kwargs["crs_transform"] = crs_transform
+            elif scale_m is not None:
+                export_kwargs["scale"] = scale_m
+
+            # Run export quietly if requested
+            if quiet:
+                sink = io.StringIO()
+                with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+                    geemap.ee_export_image(one_img, filename=out_path, **export_kwargs)
+            else:
+                geemap.ee_export_image(one_img, filename=out_path, **export_kwargs)
+
+            # If EE export failed, no file will be created
+            if not os.path.exists(out_path):
+                approx_pixels = None
+                approx_bytes = None
+                try:
+                    # Area in m²
+                    area = float(region_aligned.area(maxError=1).getInfo())
+                    # Use EE nominal scale in meters for both directions
+                    scale = float(ee.Image(img).projection().nominalScale().getInfo())
+                    approx_pixels = area / (scale * scale)
+                    # Assuming float32 export: 4 bytes per pixel
+                    approx_bytes = approx_pixels * 4.0
+                except Exception:
+                    pass
+
+                msg = (
+                    f"Earth Engine export failed: '{out_path}' was not created. "
+                    "A common cause for large downloads is the HTTP response size limit:\n"
+                    "An error occurred while downloading.\n"
+                    "Total request size must be less than or equal to 50331648 bytes.\n"
+                )
+
+                if approx_pixels is not None:
+                    msg += f"Estimated pixel count at current resolution: {approx_pixels:.2e}.\n"
+                if approx_bytes is not None:
+                    msg += (
+                        f"Approximate uncompressed payload size for float32: "
+                        f"{approx_bytes:.0f} bytes.\n"
+                        "If this value is close to or above 50331648 bytes, the download will "
+                        "hit the HTTP size limit.\n"
+                    )
+
+                msg += (
+                    "If the export still fails with a smaller region or coarser resolution, "
+                    "rerun the export with quiet=False to inspect the original Earth Engine "
+                    "error message."
+                )
+
+                raise RuntimeError(msg)
 
         # --- 3) Resampling choice ---------------------------------------------
         rm = (resample_method or "").lower()
         if rm in ("bilinear", "bicubic"):
             img_rs = ee.Image(img).resample(rm)
         elif rm in ("nearest", "", None):
-            img_rs = ee.Image(img)  # default NN (do not call resample)
+            img_rs = ee.Image(img)
         else:
             raise ValueError(
                 f"Invalid resample_method: {resample_method}. "
-                f"Use 'nearest', 'bilinear', or 'bicubic'."
+                "Use 'nearest', 'bilinear', or 'bicubic'."
             )
 
-        # --- 4) Grid-lock both DEM and pixelArea to the same target grid ------
+        # --- 4) Grid-lock DEM and pixelArea to the same grid ------------------
         ee_dem_grid = (
             ee.Image(img_rs)
-            .toDouble()
+            .toFloat()
             .reproject(crs=crs, crsTransform=crs_transform)
             .clip(region_aligned)
             .updateMask(ee.Image(img).mask())
@@ -142,12 +173,12 @@ def export_dem_and_area_to_arrays(
 
         ee_px_area_grid = (
             ee.Image.pixelArea()
+            .toFloat()
             .reproject(crs=crs, crsTransform=crs_transform)
             .updateMask(ee.Image(img).mask())
             .clip(region_aligned)
         )
 
-        # TIFF export uses an unmasked DEM with a stable NoData fill
         dem_for_export = ee_dem_grid.unmask(nodata_value)
 
         # --- 5) Temp files ----------------------------------------------------
@@ -156,9 +187,9 @@ def export_dem_and_area_to_arrays(
         dem_path = os.path.join(tmp_dir, dem_filename)
         px_path = os.path.join(tmp_dir, px_filename)
 
-        # --- 6) Server-side exports via geemap (quiet by default) -------------
-        _ee_export(dem_for_export, filename=dem_path, **export_kwargs)
-        _ee_export(ee_px_area_grid, filename=px_path, **export_kwargs)
+        # --- 6) Earth Engine → GeoTIFF export --------------------------------
+        _ee_export(dem_for_export, dem_path)
+        _ee_export(ee_px_area_grid, px_path)
 
         # --- 7) Read back with rasterio ---------------------------------------
         with rasterio.open(dem_path) as src_dem:
@@ -202,7 +233,6 @@ def export_dem_and_area_to_arrays(
         }
 
     finally:
-        # Restore previous logger levels if we changed them
         if quiet:
             for name, lvl in previous_levels.items():
                 logging.getLogger(name).setLevel(lvl)
