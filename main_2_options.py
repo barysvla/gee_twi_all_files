@@ -301,10 +301,10 @@ def run_pipeline(
             p_low=2.0,
             p_high=98.0,
             label="TWI",
-            title="Topographic Wetness Index (local mode)",
+            title="Topographic Wetness Index",
         )
 
-        # Return metadata and file paths (no interactive map in local mode)
+        # Return metadata and file paths
         return {
             "mode": "local",
             "acc_km2_array": acc_km2_clipped,
