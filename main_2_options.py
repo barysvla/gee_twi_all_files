@@ -42,7 +42,7 @@ def run_pipeline(
     use_bucket: bool = False,
 ) -> dict:
     """
-    Compute DEM conditioning, flow direction/accumulation (on buffered ROI), slope and TWI (on unbuffered ROI).
+    Compute DEM conditioning, flow direction/accumulation, slope (on buffered ROI) and TWI (on unbuffered ROI).
     Returns:
         dict with:
             - ee_flow_accumulation        (ee.Image)  # clipped to unbuffered ROI
