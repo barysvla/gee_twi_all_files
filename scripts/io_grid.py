@@ -16,7 +16,7 @@ def export_dem_and_area_to_arrays(
     src: Union[ee.image.Image, ee.imagecollection.ImageCollection, str],
     region_geom: ee.Geometry,
     *,
-    band: Optional[str] = None,                # e.aligned_geometry_or_bbox. 'DEM' for Copernicus; None for single-band
+    band: Optional[str] = None,  # e.g. 'DEM' for Copernicus; None for single-band
     resample_method: str = "bilinear",         # 'nearest' | 'bilinear' | 'bicubic'
     nodata_value: float = -9999.0,
     snap_region_to_grid: bool = True,
@@ -64,11 +64,11 @@ def export_dem_and_area_to_arrays(
             dem_image = src if band is None else src.select([band])
             reference_image = dem_image
         else:
-           dem_collection = ee.ImageCollection(src) if isinstance(src, str) else src
+            dem_collection = ee.ImageCollection(src) if isinstance(src, str) else src
             if band is not None:
-               dem_collection =dem_collection.select([band])
-            reference_image =dem_collection.first()
-            dem_image =dem_collection.filterBounds(region_geom).mosaic()
+                dem_collection = dem_collection.select([band])
+            reference_image = dem_collection.first()
+            dem_image = dem_collection.filterBounds(region_geom).mosaic()
 
         proj = ee.Image(reference_image).projection()
         dem_image = ee.Image(dem_image).setDefaultProjection(proj)
