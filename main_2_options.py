@@ -96,7 +96,7 @@ def run_pipeline(
         snap_region_to_grid=True,
     )
 
-    dem_r       = grid["dem"]
+    dem_np      = grid["dem"]
     ee_dem_grid = grid["ee_dem_grid"]             # DEM over buffered extent (server-side image)
     px_area     = grid["pixel_area_m2"]
     transform   = grid["transform"]
@@ -108,7 +108,7 @@ def run_pipeline(
 
     # --- Hydrologic conditioning (client-side arrays) ---
     dem_filled, depth = priority_flood_fill(
-        dem_r, seed_internal_nodata_as_outlet=True, return_fill_depth=True
+        dem_np, seed_internal_nodata_as_outlet=True, return_fill_depth=True
     )
     print("✅ Fill pits completed.")
 
