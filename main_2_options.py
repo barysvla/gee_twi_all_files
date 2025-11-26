@@ -96,12 +96,13 @@ def run_pipeline(
         snap_region_to_grid=True,
     )
 
-    dem_np      = grid["dem"]
-    ee_dem_grid = grid["ee_dem_grid"]             # DEM over buffered extent (server-side image)
-    px_area     = grid["pixel_area_m2"]
-    transform   = grid["transform"]
-    nodata_mask = grid["nodata_mask"]
-    out_crs     = grid["crs"]
+    dem_np       = grid["dem_elevations"]        # DEM in numpy
+    px_area_np   = grid["pixel_area_m2"]         # pixel area (numpy)
+    transform    = grid["transform"]
+    nodata_mask  = grid["nodata_mask"]
+    crs          = grid["crs"]
+    ee_dem_grid  = grid["ee_dem_grid"]           # DEM (Earth Engine grid-locked)
+
 
     scale = ee.Number(ee_dem_grid.projection().nominalScale())
     # print("nominalScale [m]:", scale.getInfo())
@@ -160,7 +161,7 @@ def run_pipeline(
     #     flow_direction, nodata_mask=nodata_mask, out="cells"
     # )
     acc_km2 = compute_flow_accumulation_qin_2007(
-        flow_direction, pixel_area_m2=px_area, nodata_mask=nodata_mask, out="km2"
+        flow_direction, pixel_area_m2=px_area_np, nodata_mask=nodata_mask, out="km2"
     )
     print("✅ Flow accumulation computed.")
 
@@ -170,7 +171,7 @@ def run_pipeline(
         # dict_acc_cells = push_array_to_ee_geotiff(
         #     acc_cells,
         #     transform=transform,
-        #     crs=out_crs,
+        #     crs=crs,
         #     nodata_mask=nodata_mask,
         #     bucket_name=f"{project_id}-ee-uploads",
         #     project_id=project_id,
@@ -181,7 +182,7 @@ def run_pipeline(
         dict_acc = push_array_to_ee_geotiff(
             acc_km2,
             transform=transform,
-            crs=out_crs,
+            crs=crs,
             nodata_mask=nodata_mask,
             bucket_name=f"{project_id}-ee-uploads",
             project_id=project_id,
@@ -255,7 +256,7 @@ def run_pipeline(
         print("✅ Slope computed.")
 
         # Compute twi numpy
-        # Here we assume acc_km2 is area (m^2). If not, use acc_cells and cell area = px_area.
+        # Here we assume acc_km2 is area (m^2). If not, use acc_cells and cell area = px_area_np.
         twi_np = compute_twi_numpy(
             acc_np=acc_km2,
             slope_deg_np=slope_np,
@@ -269,15 +270,15 @@ def run_pipeline(
 
         # Save arrays to GeoTIFFs
         geotiff_acc_km2 = save_array_as_geotiff(
-            acc_km2, transform, out_crs, nodata_mask,
+            acc_km2, transform, crs, nodata_mask,
             filename="flow_accumulation_km2.tif", band_name="Flow accumulation (km2)"
         )
         geotiff_slope = save_array_as_geotiff(
-            slope_np, transform, out_crs, nodata_mask,
+            slope_np, transform, crs, nodata_mask,
             filename="slope.tif", band_name="Slope"
         )
         geotiff_twi = save_array_as_geotiff(
-            twi_np, transform, out_crs, nodata_mask,
+            twi_np, transform, crs, nodata_mask,
             filename="twi.tif", band_name="TWI"
         )
 
@@ -314,7 +315,7 @@ def run_pipeline(
             "geotiff_slope_path": geotiff_slope,
             "geotiff_twi_path": geotiff_twi,
             "transform": transform,
-            "crs": out_crs,
+            "crs": crs,
             "nodata_mask": nodata_mask,
         }
 
@@ -334,7 +335,7 @@ def run_pipeline(
         #     "geotiff_slope_path": geotiff_slope,
         #     "geotiff_twi_path": geotiff_twi,
         #     "transform": transform,
-        #     "crs": out_crs,
+        #     "crs": crs,
         #     "nodata_mask": nodata_mask,
         #     "map": Map,
         # }
