@@ -1,234 +1,218 @@
+from __future__ import annotations
+
 import os
 import time
+import tempfile
+from typing import Any, Dict, Optional
+
 import numpy as np
 import ee
-
-from google.api_core.exceptions import NotFound, Forbidden, Conflict, BadRequest
-
-# Extra imports for COG writing and GCS upload
 import rasterio
 from google.cloud import storage
+from google.api_core.exceptions import NotFound, Forbidden, Conflict, BadRequest
 
 
-def _get_or_create_bucket(storage_client, bucket_name: str, project_id: str,
-                          location: str = "US", storage_class: str = "STANDARD"):
+def _get_or_create_bucket(
+    storage_client: storage.Client,
+    bucket_name: str,
+    *,
+    project_id: str,
+    location: str = "US",
+    storage_class: str = "STANDARD",
+) -> storage.Bucket:
     """
-    Return an existing bucket or create it in the required location (US).
-    Enforces a location compatible with ee.Image.loadGeoTIFF.
+    Get an existing GCS bucket or create it if missing.
+
+    Notes
+    -----
+    Earth Engine's ee.Image.loadGeoTIFF requires the bucket to be in an EE-compatible location.
+    This function enforces a safe subset: US multi-region or us-central1.
     """
-    # Bucket names must be lowercase per GCS rules
-    bucket_name = bucket_name.lower()
+    bucket_name = bucket_name.lower().strip()
 
     try:
-        # Requires storage.buckets.get permission
         bucket = storage_client.get_bucket(bucket_name)
         bucket.reload()
     except NotFound:
-        # Create if missing
         bucket = storage_client.bucket(bucket_name)
         bucket.storage_class = storage_class
-        # Optional but recommended: uniform bucket-level access
+
+        # Optional (recommended): uniform bucket-level access
         try:
             bucket.iam_configuration.uniform_bucket_level_access_enabled = True
         except Exception:
-            # Older client versions may not expose this property
             pass
 
         bucket = storage_client.create_bucket(bucket, project=project_id, location=location)
         bucket.reload()
+    except Conflict:
+        # Rare race: bucket created between lookup and create
+        bucket = storage_client.get_bucket(bucket_name)
+        bucket.reload()
     except Forbidden as e:
         raise RuntimeError(
             f"Forbidden to access bucket '{bucket_name}'. "
-            f"Ensure your identity has bucket metadata read (storage.buckets.get) and create permissions."
+            "Missing permissions: storage.buckets.get and/or storage.buckets.create."
         ) from e
     except BadRequest as e:
         raise RuntimeError(f"Bad request when accessing/creating bucket '{bucket_name}': {e}") from e
-    except Conflict:
-        # Rare race: created by someone else between get and create
-        bucket = storage_client.get_bucket(bucket_name)
-        bucket.reload()
 
-    # Enforce EE-compatible location for loadGeoTIFF
-    loc = (bucket.location or "").upper()
-    # Accept US multi-region, US-CENTRAL1 region, or dual including US
-    if not (loc == "US" or loc == "US-CENTRAL1" or "US" in loc):
+    # Enforce a strict, predictable location policy (avoid substring checks)
+    loc = (bucket.location or "").upper().strip()
+    if loc not in {"US", "US-CENTRAL1"}:
         raise RuntimeError(
             f"Bucket '{bucket_name}' is in location '{bucket.location}'. "
-            "ee.Image.loadGeoTIFF requires the US multi-region, a dual-region including US-CENTRAL1, "
-            "or the US-CENTRAL1 region."
+            "ee.Image.loadGeoTIFF requires US multi-region or US-CENTRAL1 (safe subset enforced here)."
         )
+
     return bucket
 
 
 def _write_cog_local(
-    array_np: np.ndarray,
+    arr_f32: np.ndarray,
+    *,
     transform,
     crs: str,
     out_path: str,
-    nodata_value: float = -9999.0,
+    nodata_value: float,
     blocksize: int = 512,
     compress: str = "LZW",
-):
+) -> None:
     """
-    Write a single-band Cloud Optimized GeoTIFF (COG) to disk.
+    Write a single-band Cloud Optimized GeoTIFF (COG).
 
-    This uses the GDAL COG driver through rasterio. It ensures:
-      - float32 data type,
-      - a proper NODATA value instead of NaN,
-      - internal tiling and compression,
-      - metadata/IFD early in the file (COG layout).
+    Requirements
+    ------------
+    - arr_f32 must be float32
+    - NaNs must already be replaced with nodata_value
     """
-    # Force float32
-    arr = array_np.astype("float32", copy=False)
+    if arr_f32.dtype != np.float32:
+        raise ValueError("_write_cog_local expects float32 input array.")
+    if not np.isfinite(nodata_value):
+        raise ValueError("nodata_value must be finite.")
 
-    # Replace NaN with the explicit nodata value
-    if np.isnan(arr).any():
-        arr = np.where(np.isnan(arr), nodata_value, arr).astype("float32", copy=False)
-
-    # Base COG profile
     profile = {
-        "driver": "COG",            # COG driver (requires GDAL with COG support)
-        "height": arr.shape[0],
-        "width": arr.shape[1],
+        "driver": "COG",
+        "height": int(arr_f32.shape[0]),
+        "width": int(arr_f32.shape[1]),
         "count": 1,
         "dtype": "float32",
         "crs": crs,
         "transform": transform,
-        "nodata": nodata_value,
+        "nodata": float(nodata_value),
         "compress": compress,
-        "blocksize": blocksize,
+        "blocksize": int(blocksize),
         "overview_resampling": "average",
         "BIGTIFF": "IF_SAFER",
     }
 
-    # Open and write
     with rasterio.open(out_path, "w", **profile) as dst:
-        dst.write(arr, 1)
+        dst.write(arr_f32, 1)
 
 
 def push_array_to_ee_geotiff(
-    arr,
+    array_np: np.ndarray,
     *,
     transform,
-    crs,
-    nodata_mask=None,
-    bucket_name,
-    project_id,
-    band_name="acc",
-    tmp_dir=None,
-    object_prefix="twi_uploads",
-    nodata_value=-9999.0,
-    dtype="float32",
-    build_mask_from_nodata=True,  # kept for signature compatibility; used to derive mask if not provided
-):
+    crs: str,
+    bucket_name: str,
+    project_id: str,
+    band_name: str = "acc",
+    nodata_mask: Optional[np.ndarray] = None,
+    nodata_value: float = -9999.0,
+    tmp_dir: Optional[str] = None,
+    object_prefix: str = "twi_uploads",
+    cleanup_local: bool = False,
+) -> Dict[str, Any]:
     """
-    Write a numpy array as a Cloud Optimized GeoTIFF (COG), upload it to GCS,
-    and load it as an ee.Image via ee.Image.loadGeoTIFF.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        2D numpy array to be stored.
-    transform : affine.Affine
-        Georeferencing transform for the raster.
-    crs : str
-        Coordinate reference system (e.g., "EPSG:32633").
-    nodata_mask : np.ndarray or None
-        Boolean mask where True marks nodata pixels. If None and build_mask_from_nodata
-        is True, nodata is inferred from non-finite values in `arr`.
-    bucket_name : str
-        Name of the GCS bucket to upload to. Must be in EE-compatible location.
-    project_id : str
-        GCP project ID (also used by Earth Engine).
-    band_name : str
-        Name of the band in the resulting ee.Image.
-    tmp_dir : str or None
-        Local temporary directory for the GeoTIFF. If None, a temp directory is created.
-    object_prefix : str
-        Folder/prefix in the bucket for organizing uploads.
-    nodata_value : float
-        Explicit nodata value to be written into the COG. Must be a finite number.
-    dtype : str
-        Target numpy dtype (only "float32" makes sense here).
-    build_mask_from_nodata : bool
-        If True and nodata_mask is None, infer nodata from non-finite values in `arr`.
+    Write a 2D numpy array to a local COG, upload it to GCS, and load it into Earth Engine.
 
     Returns
     -------
-    dict
-        {
-          "image": ee.Image,
-          "gs_uri": str,
-          "local_path": str,
-          "bucket_object": str,
-        }
+    dict with keys:
+      - image: ee.Image
+      - gs_uri: str
+      - local_path: str
+      - bucket_object: str
     """
-    # Ensure nodata_value is finite; if not, fall back to -9999.0
     if not np.isfinite(nodata_value):
         nodata_value = -9999.0
 
-    # 0) Prepare temp directory and filename
-    if tmp_dir is None:
-        import tempfile
-        tmp_dir = tempfile.mkdtemp()
-    tstamp = int(time.time())
-    tif_name = f"{band_name}_{tstamp}.tif"
-    local_path = os.path.join(tmp_dir, tif_name)
-
-    # 1) Prepare array and nodata mask
-    A = np.asarray(arr, dtype=np.float32 if dtype == "float32" else dtype)
-    if A.ndim != 2:
+    arr = np.asarray(array_np)
+    if arr.ndim != 2:
         raise ValueError("push_array_to_ee_geotiff expects a 2D array (single band).")
 
+    # Prepare nodata mask
     if nodata_mask is None:
-        if build_mask_from_nodata:
-            # Derive mask from NaN / non-finite values
-            nodata_mask = ~np.isfinite(A)
-        else:
-            nodata_mask = np.zeros_like(A, dtype=bool)
+        mask = ~np.isfinite(arr)
     else:
-        nodata_mask = np.asarray(nodata_mask, dtype=bool)
-        if nodata_mask.shape != A.shape:
-            raise ValueError("nodata_mask must have the same shape as the input array.")
+        mask = np.asarray(nodata_mask, dtype=bool)
+        if mask.shape != arr.shape:
+            raise ValueError("nodata_mask must have the same shape as array_np.")
 
-    # Apply nodata_value where mask is True
-    A_masked = A.copy()
-    A_masked[nodata_mask] = nodata_value
+    # Convert to float32 and replace NaNs/non-finite with nodata_value
+    arr_f32 = arr.astype(np.float32, copy=False)
+    if mask.any():
+        arr_f32 = arr_f32.copy()
+        arr_f32[mask] = float(nodata_value)
+    else:
+        # Still ensure no NaNs sneak in
+        if np.isnan(arr_f32).any():
+            arr_f32 = np.where(np.isnan(arr_f32), nodata_value, arr_f32).astype(np.float32, copy=False)
 
-    # 2) Write local COG
-    _write_cog_local(
-        array_np=A_masked,
-        transform=transform,
-        crs=crs,
-        out_path=local_path,
-        nodata_value=nodata_value,
-        blocksize=512,
-        compress="LZW",
-    )
+    # Prepare local output path
+    object_prefix = object_prefix.strip().strip("/")
+    safe_band = band_name.strip() or "band"
+    tstamp = int(time.time())
+    tif_name = f"{safe_band}_{tstamp}.tif"
 
-    # 3) Upload to GCS (ensure bucket exists and is in a supported location)
-    storage_client = storage.Client(project=project_id)
-    bucket = _get_or_create_bucket(
-        storage_client,
-        bucket_name=bucket_name,
-        project_id=project_id,
-        location="US",           # enforce EE-compatible location
-        storage_class="STANDARD",
-    )
+    temp_ctx = None
+    if tmp_dir is None:
+        if cleanup_local:
+            temp_ctx = tempfile.TemporaryDirectory()
+            tmp_dir = temp_ctx.name
+        else:
+            tmp_dir = tempfile.mkdtemp()
 
-    object_name = f"{object_prefix}/{tif_name}"
-    blob = bucket.blob(object_name)
-    # Explicit content type helps EE detect it properly
-    blob.upload_from_filename(local_path, content_type="image/tiff")
-    gs_uri = f"gs://{bucket.name}/{object_name}"
+    local_path = os.path.join(tmp_dir, tif_name)
 
-    # 4) Load as ee.Image (caller must have ee.Initialize() done)
-    #    Even though the file is COG, it is still a valid GeoTIFF, so loadGeoTIFF works.
-    ee_img = ee.Image.loadGeoTIFF(gs_uri).rename(band_name).toFloat()
+    # Write local COG
+    try:
+        _write_cog_local(
+            arr_f32,
+            transform=transform,
+            crs=crs,
+            out_path=local_path,
+            nodata_value=float(nodata_value),
+            blocksize=512,
+            compress="LZW",
+        )
 
-    return {
-        "image": ee_img,
-        "gs_uri": gs_uri,
-        "local_path": local_path,
-        "bucket_object": object_name,
-    }
+        # Upload to GCS (ensure bucket exists and location is compatible)
+        storage_client = storage.Client(project=project_id)
+        bucket = _get_or_create_bucket(
+            storage_client,
+            bucket_name,
+            project_id=project_id,
+            location="US",
+            storage_class="STANDARD",
+        )
+
+        object_name = f"{object_prefix}/{tif_name}"
+        blob = bucket.blob(object_name)
+        blob.upload_from_filename(local_path, content_type="image/tiff")
+        gs_uri = f"gs://{bucket.name}/{object_name}"
+
+        # Load into EE (ee.Initialize() must be done by caller)
+        ee_img = ee.Image.loadGeoTIFF(gs_uri).rename(safe_band).toFloat()
+
+        return {
+            "image": ee_img,
+            "gs_uri": gs_uri,
+            "local_path": local_path,
+            "bucket_object": object_name,
+        }
+    finally:
+        # Optional cleanup for TemporaryDirectory mode
+        if temp_ctx is not None:
+            temp_ctx.cleanup()
