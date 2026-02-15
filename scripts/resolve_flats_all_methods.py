@@ -1,8 +1,744 @@
-import numpy as np
-from collections import deque
+from __future__ import annotations
 
 import numpy as np
 from collections import deque
+from typing import Dict, Tuple, Optional
+
+
+import numpy as np
+from collections import deque
+
+# D8 neighbor offsets (index 0..7)
+D8_OFFS = [(-1, -1), (-1, 0), (-1, 1),
+           ( 0, -1),          ( 0, 1),
+           ( 1, -1), ( 1, 0), ( 1, 1)]
+
+NOFLOW = -1     # "NoFlow" in the paper
+NODATA_FD = -999
+FLOW_OUT = 8    # synthetic direction "out of DEM" for boundary cells
+
+
+def _inb(i: int, j: int, nrows: int, ncols: int) -> bool:
+    return 0 <= i < nrows and 0 <= j < ncols
+
+
+def _compute_flowdirs_d8_min_neighbor(
+    dem: np.ndarray,
+    valid: np.ndarray,
+    *,
+    boundary_flows_out: bool = True
+) -> np.ndarray:
+    """
+    Compute D8 flow directions.
+    - If a cell has at least one strictly-lower neighbor, flow goes to the lowest neighbor.
+    - Otherwise, flow direction is NOFLOW.
+    - If boundary_flows_out=True, valid boundary cells are assigned FLOW_OUT.
+    """
+    nrows, ncols = dem.shape
+    fd = np.full((nrows, ncols), NODATA_FD, dtype=np.int16)
+
+    for i in range(nrows):
+        for j in range(ncols):
+            if not valid[i, j]:
+                continue
+
+            # Boundary assumption from the paper: edges can flow out of DEM
+            if boundary_flows_out and (i == 0 or j == 0 or i == nrows - 1 or j == ncols - 1):
+                fd[i, j] = FLOW_OUT
+                continue
+
+            z0 = dem[i, j]
+            best_k = NOFLOW
+            best_z = z0
+
+            for k, (di, dj) in enumerate(D8_OFFS):
+                ni, nj = i + di, j + dj
+                if not _inb(ni, nj, nrows, ncols) or not valid[ni, nj]:
+                    continue
+                z1 = dem[ni, nj]
+                if z1 < best_z:
+                    best_z = z1
+                    best_k = k
+
+            fd[i, j] = best_k  # NOFLOW if none lower
+    return fd
+
+
+def resolve_flats_barnes_2014(
+    dem: np.ndarray,
+    nodata: float = np.nan,
+    *,
+    boundary_flows_out: bool = True,
+    apply_to_dem: bool = False,
+    epsilon: float = 2e-5
+):
+    """
+    Barnes (2014) flat resolution:
+    - Step 0: compute FlowDirections (cells with no lower neighbor get NOFLOW)
+    - Step 1: find HighEdges and LowEdges, label drainable flats via flood-fill from LowEdges,
+              remove undrainable entries from HighEdges
+    - Step 2: BFS away-from-higher -> store distances in FlatMask (and max per flat in FlatHeights)
+    - Step 3: BFS towards-lower and combine with Step 2; towards-lower has double weight
+    - Output: FlatMask + Labels; optionally apply epsilon*FlatMask to DEM
+
+    Returns:
+      dem_out  : DEM (unchanged unless apply_to_dem=True)
+      flatmask : int32 FlatMask
+      labels   : int32 Labels (0 = not a drainable flat)
+      stats    : dict
+    """
+    Z = np.asarray(dem)
+    if Z.ndim != 2:
+        raise ValueError("DEM must be 2D")
+
+    Zf = Z.astype(np.float64, copy=False)
+    nrows, ncols = Zf.shape
+
+    # Valid mask
+    if np.isnan(nodata):
+        valid = np.isfinite(Zf)
+    else:
+        valid = (Zf != nodata) & np.isfinite(Zf)
+
+    # ---- Step 0: initial flow directions (example as in the paper) ----
+    flow = _compute_flowdirs_d8_min_neighbor(Zf, valid, boundary_flows_out=boundary_flows_out)
+
+    # ---- Step 1a: build HighEdges and LowEdges (paper definition) ----
+    high_edges = deque()
+    low_edges = deque()
+
+    for i in range(nrows):
+        for j in range(ncols):
+            if not valid[i, j]:
+                continue
+
+            z0 = Zf[i, j]
+            fd0 = flow[i, j]
+
+            # High edge: (1) NOFLOW and (2) has a higher neighbor
+            if fd0 == NOFLOW:
+                has_higher = False
+                for di, dj in D8_OFFS:
+                    ni, nj = i + di, j + dj
+                    if not _inb(ni, nj, nrows, ncols) or not valid[ni, nj]:
+                        continue
+                    if Zf[ni, nj] > z0:
+                        has_higher = True
+                        break
+                if has_higher:
+                    high_edges.append((i, j))
+
+            # Low edge: (1) has defined flow (i.e., not NOFLOW and not NODATA_FD)
+            #          (2) has a same-elevation neighbor
+            #          (3) that neighbor is NOFLOW
+            if fd0 != NOFLOW and fd0 != NODATA_FD:
+                has_same_noflow = False
+                for di, dj in D8_OFFS:
+                    ni, nj = i + di, j + dj
+                    if not _inb(ni, nj, nrows, ncols) or not valid[ni, nj]:
+                        continue
+                    if Zf[ni, nj] == z0 and flow[ni, nj] == NOFLOW:
+                        has_same_noflow = True
+                        break
+                if has_same_noflow:
+                    low_edges.append((i, j))
+
+    if len(high_edges) == 0 and len(low_edges) == 0:
+        # no flats
+        dem_out = Zf.copy()
+        if np.isnan(nodata):
+            dem_out[~valid] = np.nan
+        else:
+            dem_out[~valid] = nodata
+        labels = np.zeros((nrows, ncols), dtype=np.int32)
+        flatmask = np.zeros((nrows, ncols), dtype=np.int32)
+        stats = {"n_flats": 0, "n_flat_cells": 0}
+        return dem_out, flatmask, labels, stats
+
+    # If there are high edges but no low edges => undrainable flats (paper says: stop)
+    if len(low_edges) == 0 and len(high_edges) > 0:
+        dem_out = Zf.copy()
+        if np.isnan(nodata):
+            dem_out[~valid] = np.nan
+        else:
+            dem_out[~valid] = nodata
+        labels = np.zeros((nrows, ncols), dtype=np.int32)
+        flatmask = np.zeros((nrows, ncols), dtype=np.int32)
+        stats = {"n_flats": 0, "n_flat_cells": 0, "undrainable_flats": True}
+        return dem_out, flatmask, labels, stats
+
+    # ---- Step 1b: label drainable flats via flood-fill from LowEdges ----
+    labels = np.zeros((nrows, ncols), dtype=np.int32)
+    label_id = 0
+
+    # We seed from LowEdges cells, and flood-fill across equal-elevation cells,
+    # but only across cells which are part of flat (NOFLOW) or low-edge structure.
+    # In practice, the flood-fill region is "the flat surface at elevation e".
+    for seed_i, seed_j in list(low_edges):
+        if labels[seed_i, seed_j] != 0:
+            continue
+
+        label_id += 1
+        e = Zf[seed_i, seed_j]
+        q = deque([(seed_i, seed_j)])
+        labels[seed_i, seed_j] = label_id
+
+        while q:
+            ci, cj = q.popleft()
+            for di, dj in D8_OFFS:
+                ni, nj = ci + di, cj + dj
+                if not _inb(ni, nj, nrows, ncols) or not valid[ni, nj]:
+                    continue
+                if labels[ni, nj] != 0:
+                    continue
+                if Zf[ni, nj] != e:
+                    continue
+                # Only cells on the same flat level are part of the component
+                labels[ni, nj] = label_id
+                q.append((ni, nj))
+
+    # Remove HighEdges that are not labeled => undrainable flats get excluded
+    filtered_high = deque()
+    while high_edges:
+        i, j = high_edges.popleft()
+        if labels[i, j] != 0:
+            filtered_high.append((i, j))
+    high_edges = filtered_high
+
+    # If nothing remains labeled, nothing to do
+    if label_id == 0:
+        dem_out = Zf.copy()
+        if np.isnan(nodata):
+            dem_out[~valid] = np.nan
+        else:
+            dem_out[~valid] = nodata
+        flatmask = np.zeros((nrows, ncols), dtype=np.int32)
+        stats = {"n_flats": 0, "n_flat_cells": 0}
+        return dem_out, flatmask, labels, stats
+
+    # ---- Step 2: BFS away-from-higher (queue with iteration marker) ----
+    flatmask = np.zeros((nrows, ncols), dtype=np.int32)
+    flatheights = np.zeros(label_id + 1, dtype=np.int32)
+
+    marker = (-1, -1)
+    q = deque(high_edges)
+    q.append(marker)
+    I = 1
+
+    while len(q) > 1:
+        ci, cj = q.popleft()
+        if (ci, cj) == marker:
+            I += 1
+            q.append(marker)
+            continue
+
+        # Only process unlabeled? No: only labeled flats
+        lbl = labels[ci, cj]
+        if lbl == 0:
+            continue
+
+        # Only increment each cell once
+        if flatmask[ci, cj] != 0:
+            continue
+
+        flatmask[ci, cj] = I
+        if I > flatheights[lbl]:
+            flatheights[lbl] = I
+
+        # Expand only into same-labeled cells which have NOFLOW
+        for di, dj in D8_OFFS:
+            ni, nj = ci + di, cj + dj
+            if not _inb(ni, nj, nrows, ncols) or not valid[ni, nj]:
+                continue
+            if labels[ni, nj] != lbl:
+                continue
+            if flow[ni, nj] != NOFLOW:
+                continue
+            if flatmask[ni, nj] == 0:
+                q.append((ni, nj))
+
+    # ---- Step 3: BFS towards-lower + combine (double weight to lower-gradient) ----
+    # Make all flatmask entries for labeled flats negative (as in the paper's description)
+    flatmask[labels > 0] *= -1
+
+    q = deque(low_edges)
+    q.append(marker)
+    I = 1
+
+    while len(q) > 1:
+        ci, cj = q.popleft()
+        if (ci, cj) == marker:
+            I += 1
+            q.append(marker)
+            continue
+
+        lbl = labels[ci, cj]
+        if lbl == 0:
+            continue
+
+        # Add neighbors first (same label, NOFLOW)
+        for di, dj in D8_OFFS:
+            ni, nj = ci + di, cj + dj
+            if not _inb(ni, nj, nrows, ncols) or not valid[ni, nj]:
+                continue
+            if labels[ni, nj] != lbl:
+                continue
+            if flow[ni, nj] != NOFLOW:
+                continue
+            if flatmask[ni, nj] < 0:  # still unprocessed in step 3
+                q.append((ni, nj))
+
+        # Combine gradients:
+        # - If cell had a step-2 value (negative), invert using FlatHeights and add 2I.
+        # - Otherwise just set to 2I.
+        if flatmask[ci, cj] < 0:
+            # flatmask is negative: -(step2 distance)
+            step2 = -flatmask[ci, cj]
+            flatmask[ci, cj] = (flatheights[lbl] - step2) + 2 * I
+        else:
+            flatmask[ci, cj] = 2 * I
+
+    # ---- Output DEM (optionally) ----
+    dem_out = Zf.copy()
+    if apply_to_dem:
+        sel = (labels > 0) & valid & (flatmask > 0)
+        dem_out[sel] = dem_out[sel] + epsilon * flatmask[sel]
+
+    if np.isnan(nodata):
+        dem_out[~valid] = np.nan
+    else:
+        dem_out[~valid] = nodata
+
+    stats = {
+        "n_flats": int(label_id),
+        "n_flat_cells": int(np.count_nonzero(labels)),
+        "boundary_flows_out": bool(boundary_flows_out),
+        "apply_to_dem": bool(apply_to_dem),
+        "epsilon": float(epsilon),
+    }
+    return dem_out, flatmask.astype(np.int32), labels, stats
+
+# ---------------------------------------------------
+# 8-neighborhood offsets (D8)
+OFFS8 = [
+    (-1, -1), (-1, 0), (-1, 1),
+    (0, -1),           (0, 1),
+    (1, -1),  (1, 0),  (1, 1),
+]
+
+
+def resolve_flats_garbrecht_martz_1997(
+    dem: np.ndarray,
+    nodata: float = np.nan,
+    *,
+    vertical_resolution: float = 1.0,
+    equal_tol: float = 0.0,
+    lower_tol: float = 0.0,
+    treat_oob_as_lower: bool = True,
+    max_exception_iters: int = 50,
+) -> Tuple[np.ndarray, Dict[str, np.ndarray], Dict[str, float]]:
+    """
+    Garbrecht & Martz (1997) flat-resolution algorithm.
+
+    Implements:
+      Step 1: Gradient towards lower terrain (backward growth from outlets).
+      Step 2: Gradient away from higher terrain (growth from higher edges; previously
+              incremented cells are incremented again each pass -> produces a reversed distance ramp).
+      Step 3: Linear addition of both gradients, apply to DEM using an infinitesimal increment.
+      Exceptional situation: If increments cancel, apply half-increment following Step 1 repeatedly
+                             until no flat cell remains.
+
+    Parameters
+    ----------
+    dem : np.ndarray
+        2D DEM.
+    nodata : float
+        NoData marker (np.nan supported).
+    vertical_resolution : float
+        Vertical DEM resolution vr (meters etc.). Paper uses increment = 2/100000 * vr.
+    equal_tol : float
+        Tolerance for treating elevations as equal when defining a flat surface.
+        Set 0.0 for strict (closest to the paper).
+    lower_tol : float
+        Tolerance for strictly lower comparisons; dz < -lower_tol means strictly lower.
+        Set 0.0 for strict.
+    treat_oob_as_lower : bool
+        Paper assumes boundary cells can drain outward. This models out-of-bounds as lower.
+    max_exception_iters : int
+        Safety cap for exceptional-case iterations.
+
+    Returns
+    -------
+    dem_out : np.ndarray
+        DEM modified by tiny increments (float64).
+    fields : dict[str, np.ndarray]
+        Diagnostic fields:
+          - labels: int32 flat-surface labels (0 = not in any flat surface)
+          - inc_towards: int32 increments from Step 1
+          - inc_away: int32 increments from Step 2
+          - inc_total: int32 total increments (Step 3, without half-fixes)
+          - inc_half_added: int32 extra "half increments" applied in exceptional fix
+    stats : dict[str, float]
+        Summary stats and used increments.
+    """
+    Z = np.asarray(dem, dtype=np.float64)
+    if Z.ndim != 2:
+        raise ValueError("DEM must be a 2D array.")
+
+    nrows, ncols = Z.shape
+
+    # Valid-data mask
+    if np.isnan(nodata):
+        valid = np.isfinite(Z)
+    else:
+        valid = (Z != nodata) & np.isfinite(Z)
+
+    def inb(r: int, c: int) -> bool:
+        return 0 <= r < nrows and 0 <= c < ncols
+
+    # --- Helper: strict-equality within tolerance ---
+    def is_equal(a: float, b: float) -> bool:
+        return abs(a - b) <= equal_tol
+
+    # --- Helper: determine if a cell has a strictly lower neighbor (in a given surface) ---
+    def has_strict_lower_neighbor(surface: np.ndarray, r: int, c: int, base_z: float) -> bool:
+        for dr, dc in OFFS8:
+            nr, nc = r + dr, c + dc
+            if not inb(nr, nc) or (not valid[nr, nc]):
+                if treat_oob_as_lower:
+                    return True
+                continue
+            if surface[nr, nc] < base_z - lower_tol:
+                return True
+        return False
+
+    # --- 1) Identify flat surfaces as connected components of equal elevation
+    # A "flat surface" here means: a connected region of (approximately) equal elevation
+    # that contains at least one cell without a strictly-lower neighbor AND has at least one outlet
+    # (a cell in the region adjacent to strictly-lower terrain).
+    labels = np.zeros((nrows, ncols), dtype=np.int32)
+    label_id = 0
+
+    # Precompute candidate cells: any valid cell; we will build plateaus by equality components.
+    visited = np.zeros((nrows, ncols), dtype=bool)
+
+    # These arrays will store per-label masks: outlet seeds and high-edge seeds
+    # (we keep lists of coordinates to avoid huge per-label boolean stacks).
+    outlet_seeds: Dict[int, list[tuple[int, int]]] = {}
+    highedge_seeds: Dict[int, list[tuple[int, int]]] = {}
+    flat_cells_count = 0
+    drainable_flats_count = 0
+
+    for r in range(nrows):
+        for c in range(ncols):
+            if not valid[r, c] or visited[r, c]:
+                continue
+
+            # Flood-fill connected component of equal elevation (within equal_tol).
+            base_z = Z[r, c]
+            q = deque([(r, c)])
+            visited[r, c] = True
+            comp = [(r, c)]
+
+            while q:
+                cr, cc = q.popleft()
+                for dr, dc in OFFS8:
+                    nr, nc = cr + dr, cc + dc
+                    if not inb(nr, nc) or (not valid[nr, nc]) or visited[nr, nc]:
+                        continue
+                    if is_equal(Z[nr, nc], base_z):
+                        visited[nr, nc] = True
+                        q.append((nr, nc))
+                        comp.append((nr, nc))
+
+            # Decide if this component is a "flat surface" requiring treatment:
+            # - contains at least one cell with no strictly-lower neighbor
+            # - contains at least one outlet cell (adjacent to strictly-lower terrain)
+            any_noflow = False
+            any_outlet = False
+
+            # For Step 1, seeds are cells in the component that ARE adjacent to lower terrain.
+            comp_outlets: list[tuple[int, int]] = []
+
+            # For Step 2, initial high edges are cells adjacent to higher terrain AND not adjacent to lower terrain.
+            comp_highedges: list[tuple[int, int]] = []
+
+            for (cr, cc) in comp:
+                # Outlet check: adjacent to strictly lower than base_z
+                is_outlet = False
+                is_adj_higher = False
+
+                for dr, dc in OFFS8:
+                    nr, nc = cr + dr, cc + dc
+                    if not inb(nr, nc) or (not valid[nr, nc]):
+                        if treat_oob_as_lower:
+                            is_outlet = True
+                        continue
+                    dz = Z[nr, nc] - base_z
+                    if dz < -lower_tol:
+                        is_outlet = True
+                    elif dz > equal_tol:
+                        is_adj_higher = True
+
+                if is_outlet:
+                    any_outlet = True
+                    comp_outlets.append((cr, cc))
+                else:
+                    # If no strictly-lower neighbor, the cell has no local downslope exit within the DEM
+                    any_noflow = True
+
+                # High-edge (Step 2) seed definition from paper:
+                # adjacent to higher terrain AND no adjacent lower terrain.
+                if (not is_outlet) and is_adj_higher:
+                    comp_highedges.append((cr, cc))
+
+            # If it is not "flat" (no noflow cells), skip
+            # If it has no outlet, it cannot drain (G&M requires at least one lower neighbor at edge).
+            if (not any_noflow) or (not any_outlet):
+                continue
+
+            # Label the component as a flat surface
+            label_id += 1
+            for (cr, cc) in comp:
+                labels[cr, cc] = label_id
+            outlet_seeds[label_id] = comp_outlets
+            highedge_seeds[label_id] = comp_highedges
+            flat_cells_count += len(comp)
+            drainable_flats_count += 1
+
+    # If no flats, return early
+    if label_id == 0:
+        out = Z.copy()
+        out[~valid] = (np.nan if np.isnan(nodata) else nodata)
+        fields = {
+            "labels": labels,
+            "inc_towards": np.zeros_like(labels, dtype=np.int32),
+            "inc_away": np.zeros_like(labels, dtype=np.int32),
+            "inc_total": np.zeros_like(labels, dtype=np.int32),
+            "inc_half_added": np.zeros_like(labels, dtype=np.int32),
+        }
+        stats = {
+            "n_flats": 0.0,
+            "n_flat_cells": 0.0,
+            "increment_unit": 2.0 * vertical_resolution / 100000.0,
+            "half_increment_unit": vertical_resolution / 100000.0,
+        }
+        return out, fields, stats
+
+    # Paper's increment units
+    inc_unit = 2.0 * vertical_resolution / 100000.0
+    half_unit = 1.0 * vertical_resolution / 100000.0
+
+    # --- Step 1: Gradient towards lower terrain (distance from outlets) ---
+    inc_towards = np.zeros((nrows, ncols), dtype=np.int32)
+
+    for lbl in range(1, label_id + 1):
+        # BFS within this label from outlet seeds; outlets get 0 increments.
+        seeds = outlet_seeds.get(lbl, [])
+        if not seeds:
+            # Not drainable; should not occur due to filtering.
+            continue
+
+        dist = np.full((nrows, ncols), -1, dtype=np.int32)
+        q = deque()
+
+        for (sr, sc) in seeds:
+            dist[sr, sc] = 0
+            q.append((sr, sc))
+
+        while q:
+            cr, cc = q.popleft()
+            d0 = dist[cr, cc]
+            for dr, dc in OFFS8:
+                nr, nc = cr + dr, cc + dc
+                if not inb(nr, nc):
+                    continue
+                if labels[nr, nc] != lbl:
+                    continue
+                if dist[nr, nc] != -1:
+                    continue
+                dist[nr, nc] = d0 + 1
+                q.append((nr, nc))
+
+        # Cells at distance d>0 are incremented by d (Step 1 "passes")
+        sel = (labels == lbl) & (dist > 0)
+        inc_towards[sel] = dist[sel]
+
+    # --- Step 2: Gradient away from higher terrain ---
+    # This step produces a REVERSED distance ramp:
+    # cells closest to higher terrain get the largest increment counts.
+    inc_away = np.zeros((nrows, ncols), dtype=np.int32)
+
+    for lbl in range(1, label_id + 1):
+        # Eligible cells: flat cells NOT adjacent to lower terrain (paper excludes outlet-adjacent cells here).
+        # We reconstruct "adjacent to lower" using the Step 1 seeds list.
+        outlet_set = set(outlet_seeds.get(lbl, []))
+
+        eligible = np.zeros((nrows, ncols), dtype=bool)
+        region_idx = np.argwhere(labels == lbl)
+        for (cr, cc) in region_idx:
+            eligible[cr, cc] = (cr, cc) not in outlet_set
+
+        # Initial high-edge seeds for Step 2 (may be empty in some geometries).
+        seeds = highedge_seeds.get(lbl, [])
+
+        if not seeds:
+            # If no high edges exist, Step 2 contributes nothing for this flat surface.
+            continue
+
+        dist = np.full((nrows, ncols), -1, dtype=np.int32)
+        q = deque()
+
+        for (sr, sc) in seeds:
+            if not eligible[sr, sc]:
+                continue
+            dist[sr, sc] = 0
+            q.append((sr, sc))
+
+        while q:
+            cr, cc = q.popleft()
+            d0 = dist[cr, cc]
+            for dr, dc in OFFS8:
+                nr, nc = cr + dr, cc + dc
+                if not inb(nr, nc):
+                    continue
+                if not eligible[nr, nc]:
+                    continue
+                if dist[nr, nc] != -1:
+                    continue
+                dist[nr, nc] = d0 + 1
+                q.append((nr, nc))
+
+        # Reverse the ramp to match "previously incremented cells are incremented again each pass"
+        # Desired final increments:
+        #   high-edge cells (dist=0) get max+1 increments,
+        #   next ring gets max, ... farthest gets 1.
+        max_d = dist[eligible].max() if np.any(dist[eligible] >= 0) else -1
+        if max_d < 0:
+            continue
+
+        sel = eligible & (dist >= 0)
+        inc_away[sel] = (max_d + 1) - dist[sel]
+
+    # --- Step 3: Combine increments and apply to DEM ---
+    inc_total = inc_towards + inc_away
+    dem_out = Z.copy()
+    apply = (labels > 0) & valid & (inc_total > 0)
+    dem_out[apply] = dem_out[apply] + inc_unit * inc_total[apply]
+
+    # --- Exceptional situation: cancellation creates new noflow cells ---
+    # We detect remaining noflow cells inside each labeled flat, then apply Step 1 again
+    # using HALF increment unit until resolved.
+    inc_half_added = np.zeros((nrows, ncols), dtype=np.int32)
+
+    def compute_noflow_mask(surface: np.ndarray, lbl: int, base_z: float) -> np.ndarray:
+        """Cells in label lbl that have no strictly-lower neighbor in 'surface'."""
+        m = np.zeros((nrows, ncols), dtype=bool)
+        coords = np.argwhere(labels == lbl)
+        for (cr, cc) in coords:
+            z0 = surface[cr, cc]
+            # In a perfect G&M scenario, these should be very close to base_z + increments.
+            # We use z0 for correctness after increments.
+            has_lower = False
+            for dr, dc in OFFS8:
+                nr, nc = cr + dr, cc + dc
+                if not inb(nr, nc) or (not valid[nr, nc]):
+                    if treat_oob_as_lower:
+                        has_lower = True
+                    continue
+                if surface[nr, nc] < z0 - lower_tol:
+                    has_lower = True
+            if not has_lower:
+                m[cr, cc] = True
+        return m
+
+    exception_iters_used = 0
+
+    for lbl in range(1, label_id + 1):
+        # Safety: skip if somehow not drainable
+        if not outlet_seeds.get(lbl):
+            continue
+
+        # Iterate half-increment fix until no noflow remains or cap reached.
+        for _ in range(max_exception_iters):
+            # Detect unresolved cells (no downslope neighbor) within this flat after Step 3.
+            # If none, done.
+            noflow = compute_noflow_mask(dem_out, lbl, 0.0)
+            if not np.any(noflow):
+                break
+
+            # Build BFS distance from cells that DO have a downslope (i.e., NOT in noflow)
+            # This matches "repeat Step 1" behavior: increment cells lacking drainage until they drain.
+            region = (labels == lbl)
+            seeds = np.argwhere(region & (~noflow))
+
+            if seeds.size == 0:
+                # No seed with drainage exists => cannot fix by Step 1 (should not happen for drainable flats)
+                break
+
+            dist = np.full((nrows, ncols), -1, dtype=np.int32)
+            q = deque()
+
+            for (sr, sc) in seeds:
+                dist[sr, sc] = 0
+                q.append((sr, sc))
+
+            while q:
+                cr, cc = q.popleft()
+                d0 = dist[cr, cc]
+                for dr, dc in OFFS8:
+                    nr, nc = cr + dr, cc + dc
+                    if not inb(nr, nc):
+                        continue
+                    if labels[nr, nc] != lbl:
+                        continue
+                    if dist[nr, nc] != -1:
+                        continue
+                    dist[nr, nc] = d0 + 1
+                    q.append((nr, nc))
+
+            # Apply half increments only where needed (noflow cells), proportionally to distance.
+            # One "pass" of Step 1 corresponds to +1 increment, hence +half_unit here.
+            sel = noflow & (dist > 0)
+            if not np.any(sel):
+                # If only seeds are noflow, fallback: bump all noflow by 1 half increment.
+                sel = noflow
+
+            dem_out[sel] = dem_out[sel] + half_unit * 1.0
+            inc_half_added[sel] += 1
+
+            exception_iters_used += 1
+
+        # end per-label fix loop
+
+    # Restore NoData
+    if np.isnan(nodata):
+        dem_out[~valid] = np.nan
+    else:
+        dem_out[~valid] = nodata
+
+    fields = {
+        "labels": labels.astype(np.int32),
+        "inc_towards": inc_towards.astype(np.int32),
+        "inc_away": inc_away.astype(np.int32),
+        "inc_total": inc_total.astype(np.int32),
+        "inc_half_added": inc_half_added.astype(np.int32),
+    }
+
+    stats = {
+        "n_flats": float(label_id),
+        "n_flat_cells": float(flat_cells_count),
+        "n_flats_drainable": float(drainable_flats_count),
+        "increment_unit": float(inc_unit),
+        "half_increment_unit": float(half_unit),
+        "exception_iters_used": float(exception_iters_used),
+        "equal_tol": float(equal_tol),
+        "lower_tol": float(lower_tol),
+        "vertical_resolution": float(vertical_resolution),
+    }
+
+    return dem_out, fields, stats
+
 
 def resolve_flats_towards_lower_edge(
     dem,
