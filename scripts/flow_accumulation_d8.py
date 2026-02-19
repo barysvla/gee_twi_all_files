@@ -27,11 +27,13 @@ def compute_flow_accumulation_d8(
     Each valid cell contributes:
       - 1 (out='cells'), or
       - pixel_area_m2 (out='m2'/'km2'),
-    and routes it to exactly one D8 neighbor given by dir_idx.
+    and routes it to at most one D8 neighbor given by dir_idx.
 
     Direction encoding:
       0..7 = [NE, E, SE, S, SW, W, NW, N]
-      -1   = NoData (and optionally "no outflow").
+      -1   = No outflow (sink/outlet) OR NoData, depending on nodata_mask.
+            If nodata_mask is provided, it is authoritative and -1 is treated
+            as "no outflow" on valid cells.
     """
     d = np.asarray(dir_idx)
     if d.ndim != 2:
@@ -39,7 +41,9 @@ def compute_flow_accumulation_d8(
     H, W = d.shape
 
     # --- NoData mask ---------------------------------------------------------
-    # If user provides nodata_mask, it is authoritative. Otherwise we treat dir_idx == -1 as NoData.
+    # If nodata_mask is provided, it defines invalid cells (recommended).
+    # Otherwise we conservatively treat d == -1 as NoData because we cannot
+    # distinguish "no outflow" from missing data without an external mask.
     if nodata_mask is None:
         nodata = (d < 0)
     else:
@@ -49,12 +53,12 @@ def compute_flow_accumulation_d8(
 
     # --- Sanitize directions -------------------------------------------------
     # Keep only indices in [0..7] as valid outflow directions.
-    # Anything else is treated as "no outflow" for accumulation purposes.
+    # Values outside [0..7] are treated as "no outflow" (sink/outlet) for accumulation.
     d_sane = np.full((H, W), -1, dtype=np.int16)
     valid_dir = (~nodata) & (d >= 0) & (d < 8)
     d_sane[valid_dir] = d[valid_dir].astype(np.int16, copy=False)
 
-    # --- Initialize per-cell contribution (acc starts with "own contribution") --
+    # --- Initialize per-cell contribution -----------------------------------
     if out == "cells":
         acc = np.ones((H, W), dtype=np.float64)
     else:
@@ -68,12 +72,11 @@ def compute_flow_accumulation_d8(
                 raise ValueError("pixel_area_m2 must be a scalar or have shape (H, W).")
             acc = pa.copy()
 
-    # NoData cells contribute nothing and should not receive anything.
+    # NoData cells contribute nothing and must not receive anything.
     acc[nodata] = 0.0
 
     # --- Build in-degree array ----------------------------------------------
-    # indeg[y,x] = how many upstream cells flow into this cell.
-    # In D8, each cell has at most 1 downstream edge (if it has outflow).
+    # indeg[y,x] = number of upstream cells flowing into this cell.
     indeg = np.zeros((H, W), dtype=np.int32)
 
     for i in range(H):
@@ -83,7 +86,7 @@ def compute_flow_accumulation_d8(
 
             k = int(d_sane[i, j])
             if k < 0:
-                # No outflow from this cell (should not occur for corrected DEMs, but allowed).
+                # No outflow from this cell (sink/outlet): no outgoing edge.
                 continue
 
             di, dj = D8_OFFSETS[k]
@@ -94,15 +97,12 @@ def compute_flow_accumulation_d8(
                 indeg[ni, nj] += 1
 
     # --- Initialize queue with sources --------------------------------------
-    # Sources are cells with indegree == 0 (no upstream contributors).
     q: deque[tuple[int, int]] = deque()
     src = np.argwhere((indeg == 0) & (~nodata))
     for i, j in src:
         q.append((int(i), int(j)))
 
     # --- Topological propagation --------------------------------------------
-    # Pop a node, add its accumulated value to its downstream neighbor, then decrement indegree.
-    # If a cycle exists, Kahn's algorithm will not visit all valid cells.
     visited = 0
     while q:
         i, j = q.popleft()
@@ -117,7 +117,6 @@ def compute_flow_accumulation_d8(
         ni, nj = i + di, j + dj
 
         if 0 <= ni < H and 0 <= nj < W and (not nodata[ni, nj]):
-            # In D8, weight is exactly 1.0 to the selected neighbor.
             acc[ni, nj] += acc[i, j]
 
             indeg[ni, nj] -= 1
@@ -130,7 +129,7 @@ def compute_flow_accumulation_d8(
         if visited != total_valid:
             raise RuntimeError(
                 "Cycle detected (unresolved flats/sinks or inconsistent directions). "
-                "Run hydrological conditioning / flat resolution before accumulation."
+                "Run flat resolution / hydrological conditioning before accumulation."
             )
 
     # --- Unit conversion -----------------------------------------------------
