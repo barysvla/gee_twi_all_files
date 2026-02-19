@@ -1,140 +1,119 @@
 from __future__ import annotations
 
-from collections import deque
-from typing import Literal
-
 import numpy as np
 
 
-# D8 neighbors in the order: [NE, E, SE, S, SW, W, NW, N]
-D8_OFFSETS: list[tuple[int, int]] = [
-    (-1,  1), (0,  1), (1,  1), (1,  0),
-    ( 1, -1), (0, -1), (-1, -1), (-1,  0),
-]
+# D8 neighbor offsets in fixed order: NE, E, SE, S, SW, W, NW, N
+D8_OFFSETS = np.array(
+    [
+        (-1,  1),  # NE
+        ( 0,  1),  # E
+        ( 1,  1),  # SE
+        ( 1,  0),  # S
+        ( 1, -1),  # SW
+        ( 0, -1),  # W
+        (-1, -1),  # NW
+        (-1,  0),  # N
+    ],
+    dtype=np.int32,
+)
 
 
-def compute_flow_accumulation_d8(
-    dir_idx: np.ndarray,
+def compute_flow_direction_d8(
+    dem: np.ndarray,
+    transform,
     *,
     nodata_mask: np.ndarray | None = None,
-    pixel_area_m2: float | np.ndarray | None = None,
-    out: Literal["cells", "m2", "km2"] = "km2",
-    cycle_check: bool = True,
+    nodata_value: float | None = None,
+    min_slope: float = 0.0,
+    out_dtype=np.int16,
 ) -> np.ndarray:
     """
-    Compute D8 flow accumulation by topological ordering (Kahn algorithm).
+    Compute D8 flow directions on a DEM using grid-unit distances (CRS units).
 
-    Each valid cell contributes:
-      - 1 (out='cells'), or
-      - pixel_area_m2 (out='m2'/'km2'),
-    and routes it to exactly one D8 neighbor given by dir_idx.
+    For each cell, the downslope neighbor maximizing:
+        tan(beta) = (z_center - z_neighbor) / d
+    is selected in an 8-neighborhood, where d is measured in CRS units
+    (for EPSG:4326 this means degrees).
 
-    Direction encoding:
-      0..7 = [NE, E, SE, S, SW, W, NW, N]
-      -1   = NoData (and optionally "no outflow").
+    Directions are encoded as integers:
+        0..7 = [NE, E, SE, S, SW, W, NW, N]
+        -1   = NoData (and also "no downslope neighbor" if it occurs).
     """
-    d = np.asarray(dir_idx)
-    if d.ndim != 2:
-        raise ValueError("dir_idx must have shape (H, W).")
-    H, W = d.shape
+    # --- Input normalization -------------------------------------------------
+    z = np.asarray(dem, dtype=np.float64)
+    if z.ndim != 2:
+        raise ValueError("DEM must be a 2D array.")
+    h, w = z.shape
+
+    # --- Validate transform assumptions -------------------------------------
+    # This implementation assumes a north-up raster (no rotation/shear).
+    if getattr(transform, "b", 0.0) != 0.0 or getattr(transform, "d", 0.0) != 0.0:
+        raise ValueError("Rotated/sheared transforms are not supported (expected north-up grid).")
 
     # --- NoData mask ---------------------------------------------------------
-    # If user provides nodata_mask, it is authoritative. Otherwise we treat dir_idx == -1 as NoData.
-    if nodata_mask is None:
-        nodata = (d < 0)
-    else:
+    if nodata_mask is not None:
         nodata = np.asarray(nodata_mask, dtype=bool)
-        if nodata.shape != (H, W):
-            raise ValueError("nodata_mask must have shape (H, W).")
-
-    # --- Sanitize directions -------------------------------------------------
-    # Keep only indices in [0..7] as valid outflow directions.
-    # Anything else is treated as "no outflow" for accumulation purposes.
-    d_sane = np.full((H, W), -1, dtype=np.int16)
-    valid_dir = (~nodata) & (d >= 0) & (d < 8)
-    d_sane[valid_dir] = d[valid_dir].astype(np.int16, copy=False)
-
-    # --- Initialize per-cell contribution (acc starts with "own contribution") --
-    if out == "cells":
-        acc = np.ones((H, W), dtype=np.float64)
     else:
-        if pixel_area_m2 is None:
-            raise ValueError("pixel_area_m2 is required for out='m2' or out='km2'.")
-        if np.isscalar(pixel_area_m2):
-            acc = np.full((H, W), float(pixel_area_m2), dtype=np.float64)
+        if nodata_value is not None:
+            nodata = ~np.isfinite(z) | (z == float(nodata_value))
         else:
-            pa = np.asarray(pixel_area_m2, dtype=np.float64)
-            if pa.shape != (H, W):
-                raise ValueError("pixel_area_m2 must be a scalar or have shape (H, W).")
-            acc = pa.copy()
+            nodata = ~np.isfinite(z)
 
-    # NoData cells contribute nothing and should not receive anything.
-    acc[nodata] = 0.0
+    # --- Grid-unit neighbor distances ---------------------------------------
+    # Distances are measured in CRS units (EPSG:4326 -> degrees).
+    dx = float(abs(transform.a))
+    dy = float(abs(transform.e))
+    d_diag = float(np.hypot(dx, dy))
 
-    # --- Build in-degree array ----------------------------------------------
-    # indeg[y,x] = how many upstream cells flow into this cell.
-    # In D8, each cell has at most 1 downstream edge (if it has outflow).
-    indeg = np.zeros((H, W), dtype=np.int32)
+    # Step lengths aligned with D8_OFFSETS ordering:
+    # [NE, E, SE, S, SW, W, NW, N]
+    step_len = np.array([d_diag, dx, d_diag, dy, d_diag, dx, d_diag, dy], dtype=np.float64)
 
-    for i in range(H):
-        for j in range(W):
+    # --- Output allocation ---------------------------------------------------
+    dir_idx = np.full((h, w), -1, dtype=out_dtype)
+
+    # --- Main scan over raster cells -----------------------------------------
+    for i in range(h):
+        for j in range(w):
             if nodata[i, j]:
                 continue
 
-            k = int(d_sane[i, j])
-            if k < 0:
-                # No outflow from this cell (should not occur for corrected DEMs, but allowed).
-                continue
+            zc = z[i, j]
 
-            di, dj = D8_OFFSETS[k]
-            ni, nj = i + di, j + dj
+            best_k = -1
+            best_tan = -np.inf
 
-            # Count only edges that stay inside raster and point to a valid cell.
-            if 0 <= ni < H and 0 <= nj < W and (not nodata[ni, nj]):
-                indeg[ni, nj] += 1
+            for k in range(8):
+                di, dj = int(D8_OFFSETS[k, 0]), int(D8_OFFSETS[k, 1])
+                ni, nj = i + di, j + dj
 
-    # --- Initialize queue with sources --------------------------------------
-    # Sources are cells with indegree == 0 (no upstream contributors).
-    q: deque[tuple[int, int]] = deque()
-    src = np.argwhere((indeg == 0) & (~nodata))
-    for i, j in src:
-        q.append((int(i), int(j)))
+                # Bounds check: neighbors outside raster are ignored.
+                if not (0 <= ni < h and 0 <= nj < w):
+                    continue
 
-    # --- Topological propagation --------------------------------------------
-    # Pop a node, add its accumulated value to its downstream neighbor, then decrement indegree.
-    # If a cycle exists, Kahn's algorithm will not visit all valid cells.
-    visited = 0
-    while q:
-        i, j = q.popleft()
-        visited += 1
+                # Ignore NoData neighbors (treat as absent).
+                if nodata[ni, nj]:
+                    continue
 
-        k = int(d_sane[i, j])
-        if k < 0:
-            # Sink/outlet/no-outflow: nothing to propagate further.
-            continue
+                # Downslope requirement: only strictly lower neighbors are eligible.
+                dz = zc - z[ni, nj]
+                if dz <= 0.0:
+                    continue
 
-        di, dj = D8_OFFSETS[k]
-        ni, nj = i + di, j + dj
+                d = float(step_len[k])
+                if d <= 0.0:
+                    continue
 
-        if 0 <= ni < H and 0 <= nj < W and (not nodata[ni, nj]):
-            # In D8, weight is exactly 1.0 to the selected neighbor.
-            acc[ni, nj] += acc[i, j]
+                tan_beta = dz / d
+                if tan_beta <= float(min_slope):
+                    continue
 
-            indeg[ni, nj] -= 1
-            if indeg[ni, nj] == 0:
-                q.append((ni, nj))
+                if tan_beta > best_tan:
+                    best_tan = tan_beta
+                    best_k = k
 
-    # --- Cycle detection -----------------------------------------------------
-    if cycle_check:
-        total_valid = int((~nodata).sum())
-        if visited != total_valid:
-            raise RuntimeError(
-                "Cycle detected (unresolved flats/sinks or inconsistent directions). "
-                "Run hydrological conditioning / flat resolution before accumulation."
-            )
+            dir_idx[i, j] = best_k if best_k != -1 else -1
 
-    # --- Unit conversion -----------------------------------------------------
-    if out == "km2":
-        acc *= 1e-6
-
-    return acc.astype(np.float32)
+    dir_idx[nodata] = -1
+    return dir_idx
