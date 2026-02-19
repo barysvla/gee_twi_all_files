@@ -290,11 +290,7 @@ def resolve_flats_barnes_2014(
     return dem_out, flat_mask.astype(np.int32), labels, stats
 
 # -----------------------
-from __future__ import annotations
 
-import numpy as np
-from collections import deque
-from typing import Deque, Dict, List, Tuple, Optional
 
 # 8-neighborhood offsets (D8): order is arbitrary but must be consistent everywhere
 # Index k in this list is used as the encoded flow direction (0..7).
