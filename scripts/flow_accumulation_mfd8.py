@@ -1,54 +1,156 @@
-import numpy as np
+from __future__ import annotations
+
 from collections import deque
+from typing import Literal
 
-def compute_flow_accumulation_mfd8(flow_mfd8):
+import numpy as np
+
+
+# D8 neighbors in the order: [NE, E, SE, S, SW, W, NW, N]
+D8_OFFSETS: list[tuple[int, int]] = [
+    (-1,  1), (0,  1), (1,  1), (1,  0),
+    ( 1, -1), (0, -1), (-1, -1), (-1,  0),
+]
+
+
+def compute_flow_accumulation_mfd_fd8(
+    flow_weights: np.ndarray,
+    *,
+    nodata_mask: np.ndarray | None = None,
+    pixel_area_m2: float | np.ndarray | None = None,
+    out: Literal["cells", "m2", "km2"] = "km2",
+    renormalize: bool = False,
+    cycle_check: bool = True,
+) -> np.ndarray:
     """
-    Compute flow accumulation using MFD8 flow distribution.
+    Topological flow accumulation for FD8/MFD weights (works for Quinn 1991, Qin 2007, etc.).
 
-    Parameters:
-        flow_mfd8 (3D np.ndarray): shape (rows, cols, 8), with flow weights for each D8 direction
+    Parameters
+    ----------
+    flow_weights
+        Array (H, W, 8) with non-negative outflow weights to D8 neighbors:
+        [NE, E, SE, S, SW, W, NW, N].
+        For cells with outflow, weights should sum to 1 (per cell).
+    nodata_mask
+        Boolean array (H, W), True where invalid/NoData. If None, all valid.
+    pixel_area_m2
+        Required for out='m2' or out='km2'. Can be a scalar or an (H, W) array.
+        Use per-cell area if working in EPSG:4326 with varying pixel area by latitude.
+    out
+        Output units:
+        - 'cells' : contributing cell count (starts with 1 per valid cell)
+        - 'm2'    : contributing area in square meters
+        - 'km2'   : contributing area in square kilometers
+    renormalize
+        If True, renormalize positive weights per cell to sum to 1.
+        Use only as a safety guard (e.g., float drift, external inputs).
+    cycle_check
+        If True, raise if a cycle is detected (typically unresolved flats/sinks).
 
-    Returns:
-        accumulation (2D np.ndarray): accumulated area per cell (starts with 1 for each cell)
+    Returns
+    -------
+    acc : (H, W) float32
+        Flow accumulation in requested units.
     """
-    rows, cols, _ = flow_mfd8.shape
-    accumulation = np.ones((rows, cols), dtype=np.float32)  # each cell contributes 1 by default
-    in_degree = np.zeros((rows, cols), dtype=np.int32)
+    Wgt = np.asarray(flow_weights, dtype=np.float32)
+    if Wgt.ndim != 3 or Wgt.shape[2] != 8:
+        raise ValueError("flow_weights must have shape (H, W, 8).")
+    H, W, _ = Wgt.shape
 
-    # Define D8 directions: (dy, dx)
-    D8 = [
-        (-1, 1),  # NE
-        (0, 1),   # E
-        (1, 1),   # SE
-        (1, 0),   # S
-        (1, -1),  # SW
-        (0, -1),  # W
-        (-1, -1), # NW
-        (-1, 0)   # N
-    ]
+    # Prepare nodata mask
+    if nodata_mask is None:
+        nodata = np.zeros((H, W), dtype=bool)
+    else:
+        nodata = np.asarray(nodata_mask, dtype=bool)
+        if nodata.shape != (H, W):
+            raise ValueError("nodata_mask must have shape (H, W).")
 
-    # First pass: count how many upstream neighbors flow into each cell
-    for i in range(1, rows - 1):
-        for j in range(1, cols - 1):
-            for k, (dy, dx) in enumerate(D8):
-                ni, nj = i + dy, j + dx
-                if flow_mfd8[ni, nj, (k + 4) % 8] > 0:  # reverse direction
-                    in_degree[i, j] += 1
+    # Sanitize weights: replace NaNs/Infs, drop negatives, zero-out nodata cells
+    Wgt = np.nan_to_num(Wgt, nan=0.0, posinf=0.0, neginf=0.0)
+    np.maximum(Wgt, 0.0, out=Wgt)
+    Wgt[nodata, :] = 0.0
 
-    # Initialize processing queue with cells that have no inflows
-    q = deque([(i, j) for i in range(rows) for j in range(cols) if in_degree[i, j] == 0])
+    # Optional per-cell renormalization (safety guard)
+    if renormalize:
+        sums = Wgt.sum(axis=2, dtype=np.float32)
+        pos = (sums > 0.0) & (~nodata)
+        Wgt[pos, :] /= sums[pos, None]
 
-    # Process topologically
+    # Initialize accumulation
+    if out == "cells":
+        acc = np.ones((H, W), dtype=np.float64)
+    else:
+        if pixel_area_m2 is None:
+            raise ValueError("pixel_area_m2 is required for out='m2' or out='km2'.")
+        if np.isscalar(pixel_area_m2):
+            acc = np.full((H, W), float(pixel_area_m2), dtype=np.float64)
+        else:
+            pa = np.asarray(pixel_area_m2, dtype=np.float64)
+            if pa.shape != (H, W):
+                raise ValueError("pixel_area_m2 must be a scalar or have shape (H, W).")
+            acc = pa.copy()
+
+    acc[nodata] = 0.0
+
+    # Build in-degree array for Kahn topological ordering
+    indeg = np.zeros((H, W), dtype=np.int32)
+    for i in range(H):
+        for j in range(W):
+            if nodata[i, j]:
+                continue
+            # Count downstream edges from (i,j) into valid cells
+            for k, (di, dj) in enumerate(D8_OFFSETS):
+                if Wgt[i, j, k] <= 0.0:
+                    continue
+                ni, nj = i + di, j + dj
+                if 0 <= ni < H and 0 <= nj < W and (not nodata[ni, nj]):
+                    indeg[ni, nj] += 1
+
+    # Initialize queue with sources (in-degree == 0)
+    q: deque[tuple[int, int]] = deque()
+    src = np.argwhere((indeg == 0) & (~nodata))
+    for i, j in src:
+        q.append((int(i), int(j)))
+
+    visited = 0
     while q:
         i, j = q.popleft()
-        for k, (dy, dx) in enumerate(D8):
-            ni, nj = i + dy, j + dx
-            if 0 <= ni < rows and 0 <= nj < cols:
-                weight = flow_mfd8[i, j, k]
-                if weight > 0:
-                    accumulation[ni, nj] += accumulation[i, j] * weight
-                    in_degree[ni, nj] -= 1
-                    if in_degree[ni, nj] == 0:
-                        q.append((ni, nj))
+        visited += 1
 
-    return accumulation
+        a = acc[i, j]
+        if a == 0.0:
+            # Still remove edges to keep topological progress correct
+            for k, (di, dj) in enumerate(D8_OFFSETS):
+                if Wgt[i, j, k] <= 0.0:
+                    continue
+                ni, nj = i + di, j + dj
+                if 0 <= ni < H and 0 <= nj < W and (not nodata[ni, nj]):
+                    indeg[ni, nj] -= 1
+                    if indeg[ni, nj] == 0:
+                        q.append((ni, nj))
+            continue
+
+        # Propagate accumulated contribution downstream
+        for k, (di, dj) in enumerate(D8_OFFSETS):
+            w = float(Wgt[i, j, k])
+            if w <= 0.0:
+                continue
+            ni, nj = i + di, j + dj
+            if 0 <= ni < H and 0 <= nj < W and (not nodata[ni, nj]):
+                acc[ni, nj] += a * w
+                indeg[ni, nj] -= 1
+                if indeg[ni, nj] == 0:
+                    q.append((ni, nj))
+
+    if cycle_check:
+        total_valid = int((~nodata).sum())
+        if visited != total_valid:
+            raise RuntimeError(
+                "Cycle detected (unresolved flats/sinks). "
+                "Run hydrological conditioning / flat resolution before accumulation."
+            )
+
+    if out == "km2":
+        acc *= 1e-6
+
+    return acc.astype(np.float32)
