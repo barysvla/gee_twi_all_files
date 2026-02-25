@@ -250,7 +250,7 @@ def run_pipeline(
             "map": Map,
         }
 
-else:
+    else:
         # Local mode: compute slope in EE, export directly to a persistent GeoTIFF,
         # compute TWI in NumPy, and save outputs.
     
