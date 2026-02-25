@@ -203,8 +203,7 @@ def run_pipeline(
         ee_flow_accumulation = ee_flow_accumulation_full.clip(geometry)
 
         # Slope & TWI via EE
-        slope_full = compute_slope(ee_dem_grid)
-        slope = slope_full.clip(geometry)
+        slope = compute_slope(ee_dem_grid, mode="cloud").clip(geometry)
         print("✅ Slope computed.")
         twi = compute_twi(ee_flow_accumulation, slope).clip(geometry)
         print("✅ Twi computed.")
@@ -251,14 +250,21 @@ def run_pipeline(
             "map": Map,
         }
 
-    else:
-        # Local mode: compute slope & TWI in numpy, save TIFFs
-        # Slope via EE → numpy
-        slope_np = slope_ee_to_numpy_on_grid(grid, ee_dem_grid)
+else:
+        # Local mode: compute slope in EE, export directly to a persistent GeoTIFF,
+        # compute TWI in NumPy, and save outputs.
+    
+        # Slope via EE -> export to GeoTIFF + read to NumPy
+        geotiff_slope, slope_np = compute_slope(
+            ee_dem_grid,
+            mode="local",
+            grid=grid,
+            out_tif="slope.tif",
+            return_array=True,
+        )
         print("✅ Slope computed.")
-
-        # Compute twi numpy
-        # Here we assume acc_km2 is area (m^2). If not, use acc_cells and cell area = px_area_np.
+    
+        # Compute TWI in NumPy (acc_km2 is treated as contributing area in km²)
         twi_np = compute_twi_numpy(
             acc_np=acc_km2,
             slope_deg_np=slope_np,
@@ -266,37 +272,49 @@ def run_pipeline(
             cell_area=None,
             min_slope_deg=0.1,
             nodata_mask=nodata_mask,
-            out_dtype="float32"
+            out_dtype="float32",
         )
         print("✅ Twi computed.")
-
-        # Save arrays to GeoTIFFs
+    
+        # Save remaining arrays to GeoTIFFs (slope already exported)
         geotiff_acc_km2 = save_array_as_geotiff(
-            acc_km2, transform, crs, nodata_mask,
-            filename="flow_accumulation_km2.tif", band_name="Flow accumulation (km2)"
-        )
-        geotiff_slope = save_array_as_geotiff(
-            slope_np, transform, crs, nodata_mask,
-            filename="slope.tif", band_name="Slope"
+            acc_km2,
+            transform,
+            crs,
+            nodata_mask,
+            filename="flow_accumulation_km2.tif",
+            band_name="Flow accumulation (km2)",
         )
         geotiff_twi = save_array_as_geotiff(
-            twi_np, transform, crs, nodata_mask,
-            filename="twi.tif", band_name="TWI"
+            twi_np,
+            transform,
+            crs,
+            nodata_mask,
+            filename="twi.tif",
+            band_name="TWI",
         )
-
-        geometry_wgs84 = geometry.getInfo()          
-
-        acc_km2_clipped = clip_tif_by_geojson(geotiff_acc_km2, geometry_wgs84, "acc_km2_clipped.tif", band_name="Flow accumulation (km2)")
-        slope_clipped = clip_tif_by_geojson(geotiff_slope, geometry_wgs84, "slope_clipped.tif", band_name="Slope")
-        twi_clipped = clip_tif_by_geojson(geotiff_twi, geometry_wgs84, "twi_clipped.tif", band_name="TWI")
-
-        # vis_twi = vis_2sigma_tif(twi_clipped, clamp_to_pct=(2,98), k=2.0,
-        #                 palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"])
-        # vis_slope = vis_2sigma_tif(slope_clipped, clamp_to_pct=(2,98), k=2.0,
-        #                 palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"])
-        # vis_acc = vis_2sigma_tif(acc_km2_clipped, clamp_to_pct=(2,98), k=2.0,
-        #                 palette=["#ff0000", "#ffa500", "#ffff00", "#90ee90", "#0000ff"])
-
+    
+        geometry_wgs84 = geometry.getInfo()
+    
+        acc_km2_clipped = clip_tif_by_geojson(
+            geotiff_acc_km2,
+            geometry_wgs84,
+            "acc_km2_clipped.tif",
+            band_name="Flow accumulation (km2)",
+        )
+        slope_clipped = clip_tif_by_geojson(
+            geotiff_slope,
+            geometry_wgs84,
+            "slope_clipped.tif",
+            band_name="Slope",
+        )
+        twi_clipped = clip_tif_by_geojson(
+            geotiff_twi,
+            geometry_wgs84,
+            "twi_clipped.tif",
+            band_name="TWI",
+        )
+    
         # Plot TWI as a static figure from the clipped GeoTIFF
         print("🖼 Plotting TWI (local mode, percentile stretch)…")
         plot_tif(
@@ -306,7 +324,7 @@ def run_pipeline(
             label="TWI",
             title="Topographic Wetness Index",
         )
-
+    
         # Return metadata and file paths
         return {
             "mode": "local",
